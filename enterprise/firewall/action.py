@@ -22,46 +22,8 @@ from enterprise.contracts import (
 )
 from enterprise.manifests import load_core_tool_manifest
 from enterprise.mode import EnterpriseMode
+from enterprise.sandbox import SandboxDecision, evaluate_sandbox
 from enterprise.triage import RuntimeTriageEngine, TriageRequest
-
-
-PATH_ARG_KEYS = frozenset(
-    {
-        "path",
-        "paths",
-        "file",
-        "files",
-        "file_path",
-        "file_paths",
-        "target",
-        "target_file",
-        "target_path",
-        "directory",
-        "directories",
-        "cwd",
-        "workdir",
-        "working_directory",
-    }
-)
-
-NETWORK_ARG_KEYS = frozenset(
-    {
-        "url",
-        "urls",
-        "uri",
-        "uris",
-        "href",
-        "endpoint",
-        "endpoints",
-        "base_url",
-        "api_url",
-        "target_url",
-        "host",
-        "hosts",
-        "domain",
-        "domains",
-    }
-)
 
 
 @dataclass(frozen=True)
@@ -132,7 +94,23 @@ def evaluate_tool_call(
     subject_id = _subject_id(agent)
     manifest_index = load_core_tool_manifest()
     capability = manifest_index.get(tool_name)
-    requested_side_effects = tuple(capability.side_effects) if capability else ()
+    enterprise_cfg = enterprise_config_from_root(resolved_config)
+    runtime_cfg = enterprise_cfg.get("runtime", {})
+    if not isinstance(runtime_cfg, Mapping):
+        runtime_cfg = {}
+    sandbox_cfg = enterprise_cfg.get("sandbox", {})
+    if not isinstance(sandbox_cfg, Mapping):
+        sandbox_cfg = {}
+    sandbox_decision = evaluate_sandbox(
+        tool_name,
+        args,
+        capability,
+        enforce_manifests=bool(sandbox_cfg.get("enforce_manifests", True)),
+    )
+    requested_side_effects = (
+        sandbox_decision.observation.observed_side_effects
+        or tuple(capability.side_effects) if capability else ()
+    )
     action_hash = stable_hash(
         {
             "subject_id": subject_id,
@@ -143,11 +121,6 @@ def evaluate_tool_call(
             "requested_side_effects": list(requested_side_effects),
         }
     )
-
-    enterprise_cfg = enterprise_config_from_root(resolved_config)
-    runtime_cfg = enterprise_cfg.get("runtime", {})
-    if not isinstance(runtime_cfg, Mapping):
-        runtime_cfg = {}
 
     triage = RuntimeTriageEngine(
         manifest_index=manifest_index,
@@ -164,9 +137,10 @@ def evaluate_tool_call(
             tool_args=args,
             action_hash=action_hash,
             requested_side_effects=requested_side_effects,
-            resource_paths=tuple(_extract_values_for_keys(args, PATH_ARG_KEYS)),
-            network_destinations=tuple(_extract_values_for_keys(args, NETWORK_ARG_KEYS)),
+            resource_paths=sandbox_decision.observation.resource_paths,
+            network_destinations=sandbox_decision.observation.network_destinations,
             data_classes=tuple(capability.data_classes) if capability else (),
+            extra_findings=sandbox_decision.findings,
         )
     )
 
@@ -180,6 +154,7 @@ def evaluate_tool_call(
             tool_args=args,
             action_hash=action_hash,
             triage_decision=triage_decision,
+            sandbox_decision=sandbox_decision,
         )
     except Exception as exc:
         if mode.fail_closed_high_risk and triage_decision.risk_tier in {RiskTier.HIGH, RiskTier.CRITICAL}:
@@ -280,39 +255,6 @@ def _json_safe(value: Any) -> Any:
     return str(value)
 
 
-def _extract_values_for_keys(value: Any, keys: frozenset[str]) -> list[str]:
-    found: list[str] = []
-    if isinstance(value, Mapping):
-        for raw_key, item in value.items():
-            key = str(raw_key).lower()
-            if key in keys:
-                found.extend(_string_values(item))
-            found.extend(_extract_values_for_keys(item, keys))
-        return found
-    if isinstance(value, Iterable) and not isinstance(value, (bytes, bytearray, str)):
-        for item in value:
-            found.extend(_extract_values_for_keys(item, keys))
-    return found
-
-
-def _string_values(value: Any) -> list[str]:
-    if isinstance(value, str):
-        return [value] if value else []
-    if isinstance(value, Path):
-        return [str(value)]
-    if isinstance(value, Mapping):
-        values: list[str] = []
-        for item in value.values():
-            values.extend(_string_values(item))
-        return values
-    if isinstance(value, Iterable) and not isinstance(value, (bytes, bytearray, str)):
-        values: list[str] = []
-        for item in value:
-            values.extend(_string_values(item))
-        return values
-    return []
-
-
 def _append_audit_events(
     audit_store: AuditStore,
     *,
@@ -323,6 +265,7 @@ def _append_audit_events(
     tool_args: Mapping[str, Any],
     action_hash: str,
     triage_decision: RuntimeTriageDecision,
+    sandbox_decision: SandboxDecision,
 ) -> tuple[str, ...]:
     created_at = datetime.now(timezone.utc).isoformat()
     raw_sha256 = stable_hash({"tool_name": tool_name, "tool_args": tool_args})
@@ -355,6 +298,41 @@ def _append_audit_events(
                     "risk_tier": triage_decision.risk_tier.value,
                     "detectors": list(triage_decision.detectors),
                     "latency_ms": triage_decision.latency_ms,
+                },
+            )
+        )
+        event_ids.append(event_id)
+    if sandbox_decision.findings:
+        event_id = stable_hash(
+            {
+                "event_type": AuditEventType.SANDBOX_VIOLATION.value,
+                "action_hash": action_hash,
+                "decision_id": triage_decision.decision_id,
+                "created_at": created_at,
+            }
+        )[:32]
+        audit_store.append_event(
+            AuditEvent(
+                event_id=event_id,
+                event_type=AuditEventType.SANDBOX_VIOLATION,
+                subject_id=subject_id,
+                action_id=action_hash,
+                decision_id=triage_decision.decision_id,
+                redacted_preview=preview,
+                raw_sha256=raw_sha256,
+                created_at=created_at,
+                metadata={
+                    "tool_name": tool_name,
+                    "task_id": task_id,
+                    "tool_call_id": tool_call_id,
+                    "outcome": triage_decision.outcome.value,
+                    "sandbox_profile": sandbox_decision.observation.sandbox_profile,
+                    "observed_side_effects": list(sandbox_decision.observation.observed_side_effects),
+                    "resource_path_count": len(sandbox_decision.observation.resource_paths),
+                    "network_destination_count": len(sandbox_decision.observation.network_destinations),
+                    "env_key_count": sandbox_decision.observation.env_key_count,
+                    "env_secret_like": sandbox_decision.observation.env_secret_like,
+                    "detectors": [finding.detector for finding in sandbox_decision.findings],
                 },
             )
         )

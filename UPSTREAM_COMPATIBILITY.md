@@ -144,6 +144,30 @@ Result:
 36 passed
 ```
 
+Sandbox enforcement slice verification:
+
+```text
+python -m pytest -o addopts="" --basetemp .pytest-tmp tests\enterprise\test_sandbox_enforcement.py tests\enterprise\test_action_firewall.py tests\enterprise\test_triage.py tests\enterprise\test_contracts.py
+```
+
+Result:
+
+```text
+24 passed
+```
+
+Full enterprise package verification after the sandbox enforcement slice:
+
+```text
+python -m pytest -o addopts="" --basetemp .pytest-tmp tests\enterprise
+```
+
+Result:
+
+```text
+42 passed
+```
+
 Additional environment note:
 
 ```text
@@ -194,10 +218,13 @@ The current runtime patches are intentionally small:
 2. One lazy enterprise preflight check in concurrent tool execution.
 3. One sanitizer call inside `make_tool_result_message(...)` before tool output
    enters model-visible context.
+4. One enterprise-module extension that feeds sandbox observed side effects into
+   the existing action-firewall triage path. This slice does not add a new core
+   Hermes patch.
 
 Enterprise mode remains disabled by default, and focused tests cover
 enterprise-off behavior plus existing tool-loop guardrail behavior.
 
-The next meaningful compatibility risks appear when adding sandbox enforcement,
-staged execution, provider egress policy, memory gates, plugin admission,
-gateway identity, or cron authority.
+The next meaningful compatibility risks appear when adding staged execution,
+provider egress policy, memory gates, plugin admission, gateway identity, or
+cron authority.
