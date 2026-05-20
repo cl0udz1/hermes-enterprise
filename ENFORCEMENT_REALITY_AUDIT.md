@@ -31,11 +31,15 @@ Implemented so far:
     concurrent execution.
 12. Action Firewall audit events for proposed actions and policy decisions.
 13. Enterprise-off and enterprise-on tests for blocked tool calls.
+14. Tool-Result Sanitizer v0 for model-visible tool messages.
+15. Result sanitizer audit events with raw hashes and redacted previews.
+16. Enterprise-off and enterprise-on tests for sanitized tool results.
 
 Hermes authority seams patched so far:
 
 1. `agent/tool_executor.py` preflight for sequential tool execution.
 2. `agent/tool_executor.py` preflight for concurrent tool execution.
+3. `agent/tool_dispatch_helpers.py` tool-result message construction.
 
 ## Current Hermes Authority Surfaces
 
@@ -61,6 +65,7 @@ surfaces:
 | `hermes_cli/config.py` | Add disabled-by-default enterprise config defaults and root-key validation. | None; enterprise mode remains off. |
 | `enterprise/manifests/core_tools.yaml` | Define initial risk metadata for covered high-risk tool families. | None; metadata is not enforced yet. |
 | `agent/tool_executor.py` | Add lazy enterprise preflight before sequential and concurrent tool execution. | Blocks covered tool calls before execution when enterprise mode is enabled. |
+| `agent/tool_dispatch_helpers.py` | Route tool-result message construction through the enterprise result sanitizer. | Sanitizes covered tool output before model-visible context when enterprise mode is enabled. |
 
 ## Controls Not Yet Implemented
 
@@ -79,7 +84,8 @@ These are not real yet:
 10. SIEM export.
 11. Tamper-evident audit storage.
 12. Tenant/workspace isolation.
-13. Result sanitizer and context labeling.
+13. Full semantic DLP/prompt-injection classification beyond deterministic
+    sanitizer patterns.
 
 ## First Enforcement Claims Allowed After MVP-0
 
@@ -138,3 +144,21 @@ Action Firewall v0 evidence:
    `tests/enterprise/test_action_firewall.py::test_action_firewall_blocked_sequential_call_never_reaches_tool_runner`
    and
    `tests/enterprise/test_action_firewall.py::test_action_firewall_blocked_concurrent_call_is_not_submitted`.
+
+Tool-Result Sanitizer v0 evidence:
+
+1. Enforcement point: `agent/tool_dispatch_helpers.py::make_tool_result_message`
+   before tool output is appended to conversation messages.
+2. Policy decision: `enterprise.firewall.result.sanitize_tool_result(...)`
+   using deterministic secret and prompt-injection pattern checks.
+3. Raw hash: included in the sanitized model-visible label and audit
+   `raw_sha256`.
+4. Redacted previews only: `result_sanitized` audit events store sanitized
+   previews without raw fake API keys.
+5. Enterprise-off tests:
+   `tests/enterprise/test_result_firewall.py::test_result_sanitizer_disabled_returns_content_unchanged`
+   and `tests/run_agent/test_tool_name_db_persistence.py`.
+6. Enterprise-on tests:
+   `tests/enterprise/test_result_firewall.py::test_result_sanitizer_redacts_secret_and_neutralizes_prompt_bait`
+   and
+   `tests/enterprise/test_result_firewall.py::test_runtime_tool_result_is_sanitized_before_message_append`.
