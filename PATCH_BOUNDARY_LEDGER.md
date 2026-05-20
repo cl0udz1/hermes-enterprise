@@ -19,6 +19,9 @@ Two enterprise runtime authority patches exist:
 The patch is disabled by default through `enterprise.enabled: false`. It does
 not patch provider egress, memory, gateway, plugin admission, or cron authority.
 
+Sandbox Enforcement v0 extends the existing enterprise action-firewall module
+without touching a new mature Hermes core runtime file.
+
 Upstream base:
 
 ```text

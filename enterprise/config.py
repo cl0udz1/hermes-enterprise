@@ -25,6 +25,13 @@ DEFAULT_ENTERPRISE_CONFIG: dict[str, Any] = {
         "low_risk_latency_budget_ms": 150,
         "llm_evaluator_enabled": False,
     },
+    "runtime": {
+        "allowed_roots": [],
+        "denied_roots": [],
+        "allowed_hosts": [],
+        "denied_hosts": [],
+        "allow_private_network": False,
+    },
     "sandbox": {
         "enforce_manifests": True,
     },

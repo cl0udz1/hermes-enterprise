@@ -38,6 +38,7 @@ class TriageRequest:
     network_destinations: tuple[str, ...] = ()
     data_classes: tuple[str, ...] = ()
     grants: tuple[AccessGrant, ...] = ()
+    extra_findings: tuple[DetectorFinding, ...] = ()
     created_at: str = ""
 
     def resolved_action_hash(self) -> str:
@@ -85,7 +86,7 @@ class RuntimeTriageEngine:
     def evaluate(self, request: TriageRequest) -> RuntimeTriageDecision:
         started = time.perf_counter()
         capability = self.manifest_index.get(request.tool_name)
-        findings: list[DetectorFinding] = []
+        findings: list[DetectorFinding] = list(request.extra_findings)
 
         findings.extend(
             detect_manifest_mismatch(

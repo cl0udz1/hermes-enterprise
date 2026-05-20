@@ -34,6 +34,12 @@ Implemented so far:
 14. Tool-Result Sanitizer v0 for model-visible tool messages.
 15. Result sanitizer audit events with raw hashes and redacted previews.
 16. Enterprise-off and enterprise-on tests for sanitized tool results.
+17. Sandbox profile definitions for all core manifest profiles.
+18. Sandbox Enforcement v0 that observes filesystem, network, process/code, and
+    explicit environment-forwarding intent before tool execution.
+19. Sandbox violation audit events with redacted previews and observed side
+    effect metadata.
+20. Enterprise-off and enterprise-on tests for sandbox profile violations.
 
 Hermes authority seams patched so far:
 
@@ -66,6 +72,8 @@ surfaces:
 | `enterprise/manifests/core_tools.yaml` | Define initial risk metadata for covered high-risk tool families. | None; metadata is not enforced yet. |
 | `agent/tool_executor.py` | Add lazy enterprise preflight before sequential and concurrent tool execution. | Blocks covered tool calls before execution when enterprise mode is enabled. |
 | `agent/tool_dispatch_helpers.py` | Route tool-result message construction through the enterprise result sanitizer. | Sanitizes covered tool output before model-visible context when enterprise mode is enabled. |
+| `enterprise/firewall/action.py` | Feed observed sandbox side effects into triage and emit sandbox violation audit events. | Enforces manifest/profile mismatch checks inside the existing action firewall path. |
+| `enterprise/sandbox/*` | Define sandbox profiles and v0 observed-intent enforcement. | No direct runtime authority until called by the action firewall. |
 
 ## Controls Not Yet Implemented
 
@@ -86,6 +94,7 @@ These are not real yet:
 12. Tenant/workspace isolation.
 13. Full semantic DLP/prompt-injection classification beyond deterministic
     sanitizer patterns.
+14. OS/container-level syscall, filesystem, and network sandbox enforcement.
 
 ## First Enforcement Claims Allowed After MVP-0
 
@@ -97,6 +106,8 @@ MVP-0 may claim only what is implemented and tested:
 4. Covered decisions write local audit events.
 5. Deterministic runtime triage exists for covered checks.
 6. Enterprise-off compatibility is tested for touched paths.
+7. Covered tool calls are checked against declared sandbox profiles and observed
+   side effects before execution.
 
 ## Bypass Classes To Track
 
@@ -162,3 +173,21 @@ Tool-Result Sanitizer v0 evidence:
    `tests/enterprise/test_result_firewall.py::test_result_sanitizer_redacts_secret_and_neutralizes_prompt_bait`
    and
    `tests/enterprise/test_result_firewall.py::test_runtime_tool_result_is_sanitized_before_message_append`.
+
+Sandbox Enforcement v0 evidence:
+
+1. Enforcement point: `enterprise.firewall.action.evaluate_tool_call(...)`
+   before the existing action-firewall policy decision is returned.
+2. Policy decision: `enterprise.sandbox.evaluate_sandbox(...)` derives observed
+   side effects from tool arguments and compares them to the tool manifest and
+   sandbox profile.
+3. Denied/allowed action hash: includes the observed requested side effects used
+   by triage.
+4. Redacted previews only: `sandbox_violation` audit events store counts,
+   detectors, and side-effect labels, not raw environment values.
+5. Enterprise-off tests:
+   `tests/enterprise/test_sandbox_enforcement.py::test_action_firewall_disabled_skips_sandbox_enforcement`.
+6. Enterprise-on tests:
+   `tests/enterprise/test_sandbox_enforcement.py::test_action_firewall_denies_sandbox_violation_and_audits`
+   and
+   `tests/enterprise/test_sandbox_enforcement.py::test_action_firewall_sandbox_env_violation_does_not_leak_secret`.
