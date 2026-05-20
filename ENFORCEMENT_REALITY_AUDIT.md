@@ -8,8 +8,8 @@ tests prove it.
 
 ## Current Status
 
-Enterprise package skeleton work has started, but no enterprise runtime
-enforcement has been implemented yet.
+Enterprise package skeleton work has started, and the first runtime enforcement
+seam is implemented for tool execution.
 
 Implemented so far:
 
@@ -27,8 +27,15 @@ Implemented so far:
 9. Enterprise tests for manifest loading and required high-risk tool coverage.
 10. Enterprise tests for deterministic triage denial/approval paths and cache
     expiry.
+11. Action Firewall v0 for covered Hermes tool calls in sequential and
+    concurrent execution.
+12. Action Firewall audit events for proposed actions and policy decisions.
+13. Enterprise-off and enterprise-on tests for blocked tool calls.
 
-No Hermes authority seam has been patched yet.
+Hermes authority seams patched so far:
+
+1. `agent/tool_executor.py` preflight for sequential tool execution.
+2. `agent/tool_executor.py` preflight for concurrent tool execution.
 
 ## Current Hermes Authority Surfaces
 
@@ -53,12 +60,14 @@ surfaces:
 | `pyproject.toml` | Include the new `enterprise` package in setuptools discovery. | None. |
 | `hermes_cli/config.py` | Add disabled-by-default enterprise config defaults and root-key validation. | None; enterprise mode remains off. |
 | `enterprise/manifests/core_tools.yaml` | Define initial risk metadata for covered high-risk tool families. | None; metadata is not enforced yet. |
+| `agent/tool_executor.py` | Add lazy enterprise preflight before sequential and concurrent tool execution. | Blocks covered tool calls before execution when enterprise mode is enabled. |
 
 ## Controls Not Yet Implemented
 
 These are not real yet:
 
-1. Action Firewall.
+1. Approval queue/staged execution for Action Firewall approval-required
+   decisions.
 2. Agentic WAF.
 3. Provider egress gateway.
 4. Secret broker.
@@ -70,6 +79,7 @@ These are not real yet:
 10. SIEM export.
 11. Tamper-evident audit storage.
 12. Tenant/workspace isolation.
+13. Result sanitizer and context labeling.
 
 ## First Enforcement Claims Allowed After MVP-0
 
@@ -108,11 +118,23 @@ For every security control, keep evidence of:
 5. The test that proves the behavior.
 6. The enterprise-off compatibility test.
 
-## Next Required Audit Update
+## Latest Audit Evidence
 
-Update this file during the first coding PR to record:
+Action Firewall v0 evidence:
 
-1. What `enterprise/` modules were added.
-2. Whether any core Hermes files were touched.
-3. Which tests prove enterprise disabled is a no-op.
-4. Which controls are still planning-only.
+1. Enforcement point: `agent/tool_executor.py` before sequential execution and
+   before concurrent worker submission.
+2. Policy decision: `enterprise.firewall.action.evaluate_tool_call(...)` using
+   the deterministic triage engine and core capability manifest.
+3. Denied/allowed action hash: included in blocked tool result and audit event
+   `action_id`.
+4. Redacted previews only: audit events store `terminal(command)` style
+   previews and raw hashes, not raw arguments in previews.
+5. Enterprise-off tests:
+   `tests/enterprise/test_action_firewall.py::test_action_firewall_disabled_is_a_true_noop`
+   and
+   `tests/enterprise/test_action_firewall.py::test_enterprise_off_sequential_tool_execution_is_unchanged`.
+6. Enterprise-on tests:
+   `tests/enterprise/test_action_firewall.py::test_action_firewall_blocked_sequential_call_never_reaches_tool_runner`
+   and
+   `tests/enterprise/test_action_firewall.py::test_action_firewall_blocked_concurrent_call_is_not_submitted`.
