@@ -17,8 +17,10 @@ Implemented so far:
 2. Enterprise mode resolver.
 3. Runtime contract dataclasses with deterministic JSON/hashing.
 4. Local SQLite audit store skeleton for structured events.
-5. Enterprise tests for contracts, config defaults, import no-op behavior, and
+5. Capability manifest schema and default core tool manifest.
+6. Enterprise tests for contracts, config defaults, import no-op behavior, and
    audit store append/list behavior.
+7. Enterprise tests for manifest loading and required high-risk tool coverage.
 
 No Hermes authority seam has been patched yet.
 
@@ -44,6 +46,7 @@ surfaces:
 |---|---|---|
 | `pyproject.toml` | Include the new `enterprise` package in setuptools discovery. | None. |
 | `hermes_cli/config.py` | Add disabled-by-default enterprise config defaults and root-key validation. | None; enterprise mode remains off. |
+| `enterprise/manifests/core_tools.yaml` | Define initial risk metadata for covered high-risk tool families. | None; metadata is not enforced yet. |
 
 ## Controls Not Yet Implemented
 

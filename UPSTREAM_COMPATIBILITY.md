@@ -81,6 +81,9 @@ Environment notes:
 5. The default pytest temp root under AppData was inaccessible on this machine,
    so the targeted run used workspace-local `--basetemp .pytest-tmp`.
 
+Capability manifest slice verification should use the same targeted command and
+must include `tests\enterprise\test_manifests.py`.
+
 Before the first runtime authority patch, also record:
 
 1. Python executable path.
