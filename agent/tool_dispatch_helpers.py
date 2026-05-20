@@ -28,7 +28,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from agent.tool_result_classification import (
     FILE_MUTATING_TOOL_NAMES as _FILE_MUTATING_TOOLS,
@@ -317,10 +317,55 @@ def _trajectory_normalize_msg(msg: Dict[str, Any]) -> Dict[str, Any]:
     return msg
 
 
-def make_tool_result_message(name: str, content: Any, tool_call_id: str) -> dict:
+def _sanitize_enterprise_tool_result(
+    name: str,
+    content: Any,
+    tool_call_id: str,
+    root_config: Optional[Mapping[str, Any]],
+) -> Any:
+    try:
+        from enterprise.firewall.result import sanitize_tool_result
+
+        return sanitize_tool_result(
+            name,
+            content,
+            tool_call_id=tool_call_id,
+            root_config=root_config,
+        ).content
+    except Exception as exc:
+        logger.error("Enterprise result sanitizer failed for %s: %s", name, exc, exc_info=True)
+        enabled = False
+        try:
+            from enterprise.mode import EnterpriseMode
+
+            enabled = EnterpriseMode.from_config(root_config).enabled
+        except Exception:
+            enabled = False
+        if enabled:
+            return json.dumps(
+                {
+                    "error": "Enterprise result sanitizer failed closed before model context.",
+                    "enterprise": {
+                        "tool_name": name,
+                        "reason": str(exc),
+                    },
+                },
+                ensure_ascii=False,
+            )
+        return content
+
+
+def make_tool_result_message(
+    name: str,
+    content: Any,
+    tool_call_id: str,
+    *,
+    root_config: Optional[Mapping[str, Any]] = None,
+) -> dict:
     """Build a tool-result message dict with both the OpenAI-format ``name``
     field (required by the wire format and provider adapters) and the internal
     ``tool_name`` field (written to the session DB messages table)."""
+    content = _sanitize_enterprise_tool_result(name, content, tool_call_id, root_config)
     return {
         "role": "tool",
         "name": name,

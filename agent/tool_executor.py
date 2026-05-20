@@ -109,6 +109,14 @@ def _enterprise_pre_tool_decision(agent, function_name: str, function_args: dict
         return None
 
 
+def _enterprise_result_root_config(agent):
+    for attr in ("enterprise_root_config", "_enterprise_root_config", "root_config", "_root_config", "config", "_config"):
+        value = getattr(agent, attr, None)
+        if isinstance(value, Mapping):
+            return value
+    return None
+
+
 def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effective_task_id: str, api_call_count: int = 0) -> None:
     """Execute multiple tool calls concurrently using a thread pool.
 
@@ -126,6 +134,7 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
                 tc.function.name,
                 f"[Tool execution cancelled — {tc.function.name} was skipped due to user interrupt]",
                 tc.id,
+                root_config=_enterprise_result_root_config(agent),
             ))
         return
 
@@ -500,7 +509,12 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
         # image tool result never poisons canonical session history.
         # String results pass through unchanged.
         _tool_content = agent._tool_result_content_for_active_model(name, function_result)
-        messages.append(make_tool_result_message(name, _tool_content, tc.id))
+        messages.append(make_tool_result_message(
+            name,
+            _tool_content,
+            tc.id,
+            root_config=_enterprise_result_root_config(agent),
+        ))
 
         # ── Per-tool /steer drain ───────────────────────────────────
         # Same as the sequential path: drain between each collected
@@ -935,7 +949,12 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
         # Unwrap _multimodal dicts to an OpenAI-style content list
         # (see parallel path for rationale). String results pass through.
         _tool_content = agent._tool_result_content_for_active_model(function_name, function_result)
-        messages.append(make_tool_result_message(function_name, _tool_content, tool_call.id))
+        messages.append(make_tool_result_message(
+            function_name,
+            _tool_content,
+            tool_call.id,
+            root_config=_enterprise_result_root_config(agent),
+        ))
 
         # ── Per-tool /steer drain ───────────────────────────────────
         # Drain pending steer BETWEEN individual tool calls so the
@@ -961,6 +980,7 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
                     skipped_name,
                     f"[Tool execution skipped — {skipped_name} was not started. User sent a new message]",
                     skipped_tc.id,
+                    root_config=_enterprise_result_root_config(agent),
                 ))
             break
 

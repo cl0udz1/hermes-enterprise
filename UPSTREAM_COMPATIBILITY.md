@@ -120,6 +120,30 @@ Result:
 31 passed
 ```
 
+Tool-result sanitizer runtime slice verification:
+
+```text
+python -m pytest -o addopts="" --basetemp .pytest-tmp tests\enterprise\test_result_firewall.py tests\enterprise\test_action_firewall.py tests\run_agent\test_tool_name_db_persistence.py tests\run_agent\test_tool_call_guardrail_runtime.py
+```
+
+Result:
+
+```text
+20 passed
+```
+
+Full enterprise package verification after the result sanitizer slice:
+
+```text
+python -m pytest -o addopts="" --basetemp .pytest-tmp tests\enterprise
+```
+
+Result:
+
+```text
+36 passed
+```
+
 Additional environment note:
 
 ```text
@@ -161,14 +185,19 @@ When enterprise mode is disabled:
 
 ## Current Compatibility Risk
 
-Risk is moderate now because the first Hermes runtime authority seam has been
+Risk is moderate now because two Hermes runtime authority seams have been
 patched.
 
-The current runtime patch is intentionally small: it adds one lazy enterprise
-preflight check in sequential tool execution and one in concurrent tool
-execution. Enterprise mode remains disabled by default, and focused tests cover
+The current runtime patches are intentionally small:
+
+1. One lazy enterprise preflight check in sequential tool execution.
+2. One lazy enterprise preflight check in concurrent tool execution.
+3. One sanitizer call inside `make_tool_result_message(...)` before tool output
+   enters model-visible context.
+
+Enterprise mode remains disabled by default, and focused tests cover
 enterprise-off behavior plus existing tool-loop guardrail behavior.
 
-The next meaningful compatibility risks appear when adding result sanitization,
-provider egress policy, memory gates, plugin admission, gateway identity, or cron
-authority.
+The next meaningful compatibility risks appear when adding sandbox enforcement,
+staged execution, provider egress policy, memory gates, plugin admission,
+gateway identity, or cron authority.
