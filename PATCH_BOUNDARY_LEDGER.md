@@ -9,7 +9,11 @@ cannot be controlled any other way.
 
 ## Current Status
 
-No enterprise runtime patches have been made yet.
+No enterprise runtime authority patches have been made yet.
+
+The MVP-0 skeleton branch adds enterprise package discovery, default config, and
+new enterprise modules/tests. It does not patch tool execution, provider egress,
+memory, gateway, plugin admission, or cron authority.
 
 Upstream base:
 
