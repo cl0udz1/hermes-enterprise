@@ -18,6 +18,10 @@ DEFAULT_ENTERPRISE_CONFIG: dict[str, Any] = {
     "audit": {
         "backend": "sqlite",
     },
+    "staging": {
+        "backend": "sqlite",
+        "enabled": True,
+    },
     "policy": {
         "bundle_path": None,
     },

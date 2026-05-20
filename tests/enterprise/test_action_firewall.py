@@ -11,6 +11,7 @@ from agent import tool_executor
 from enterprise.audit import AuditStore
 from enterprise.contracts import DecisionOutcome
 from enterprise.firewall.action import ActionFirewallDecision, evaluate_tool_call
+from enterprise.staging import StageStore
 from run_agent import AIAgent
 
 
@@ -76,12 +77,14 @@ def test_action_firewall_disabled_is_a_true_noop():
 
 def test_action_firewall_blocks_approval_required_tool_and_audits(tmp_path):
     store = AuditStore(tmp_path / "audit.sqlite3")
+    stages = StageStore(tmp_path / "staged.sqlite3")
 
     decision = evaluate_tool_call(
         "terminal",
         {"command": "echo hello"},
         root_config={"enterprise": {"enabled": True}},
         audit_store=store,
+        stage_store=stages,
         task_id="task-1",
         tool_call_id="call-1",
     )
@@ -89,16 +92,19 @@ def test_action_firewall_blocks_approval_required_tool_and_audits(tmp_path):
     assert decision.allows_execution is False
     assert decision.triage_decision is not None
     assert decision.triage_decision.outcome is DecisionOutcome.APPROVAL_REQUIRED
-    assert store.count() == 2
+    assert decision.staged_record is not None
+    assert store.count() == 3
+    assert stages.count() == 1
 
     payload = json.loads(decision.tool_result)
-    assert payload["error"] == "Enterprise action firewall requires approval before executing this tool."
+    assert payload["error"] == "Enterprise action firewall staged this action for approval before execution."
     assert payload["enterprise"]["tool_name"] == "terminal"
     assert payload["enterprise"]["outcome"] == "approval_required"
     assert payload["enterprise"]["risk_tier"] == "critical"
+    assert payload["enterprise"]["stage"]["stage_id"] == decision.staged_record.stage_id
 
     events = store.list_events()
-    assert [event.event_type.value for event in events] == ["action_proposed", "policy_decision"]
+    assert [event.event_type.value for event in events] == ["action_proposed", "policy_decision", "action_staged"]
     assert events[0].redacted_preview == "terminal(command)"
     assert "echo hello" not in events[0].redacted_preview
 
