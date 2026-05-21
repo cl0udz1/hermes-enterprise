@@ -1,0 +1,72 @@
+name: Enterprise MVP-0 Gate
+
+on:
+  push:
+    branches: [enterprise/main]
+    paths:
+      - "enterprise/**"
+      - "tests/enterprise/**"
+      - "agent/tool_executor.py"
+      - "agent/tool_dispatch_helpers.py"
+      - "hermes_cli/config.py"
+      - "hermes_cli/doctor.py"
+      - "scripts/enterprise_mvp0_gate.py"
+      - "pyproject.toml"
+      - "PATCH_BOUNDARY_LEDGER.md"
+      - "UPSTREAM_COMPATIBILITY.md"
+      - "ENFORCEMENT_REALITY_AUDIT.md"
+      - "HERMES_ENTERPRISE_*.md"
+      - ".github/workflows/enterprise-mvp0-gate.yml"
+  pull_request:
+    branches: [enterprise/main]
+    paths:
+      - "enterprise/**"
+      - "tests/enterprise/**"
+      - "agent/tool_executor.py"
+      - "agent/tool_dispatch_helpers.py"
+      - "hermes_cli/config.py"
+      - "hermes_cli/doctor.py"
+      - "scripts/enterprise_mvp0_gate.py"
+      - "pyproject.toml"
+      - "PATCH_BOUNDARY_LEDGER.md"
+      - "UPSTREAM_COMPATIBILITY.md"
+      - "ENFORCEMENT_REALITY_AUDIT.md"
+      - "HERMES_ENTERPRISE_*.md"
+      - ".github/workflows/enterprise-mvp0-gate.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: enterprise-mvp0-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  gate:
+    name: Enterprise MVP-0 release gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5
+
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: |
+          uv venv .venv --python 3.11
+          source .venv/bin/activate
+          uv pip install -e ".[all,dev]"
+
+      - name: Run Enterprise MVP-0 gate
+        run: |
+          source .venv/bin/activate
+          python scripts/enterprise_mvp0_gate.py
+        env:
+          OPENROUTER_API_KEY: ""
+          OPENAI_API_KEY: ""
+          NOUS_API_KEY: ""

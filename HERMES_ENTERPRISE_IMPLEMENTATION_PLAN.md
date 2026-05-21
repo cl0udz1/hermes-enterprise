@@ -876,6 +876,16 @@ Before MVP-0 can be called complete, CI should run:
 CI may be staged. The first PR can start with local tests plus documented manual
 verification, but no runtime patch should merge without automated coverage.
 
+MVP-0 downstream gate:
+
+```text
+python scripts/enterprise_mvp0_gate.py
+```
+
+The matching workflow is `.github/workflows/enterprise-mvp0-gate.yml`. It runs
+for PRs and pushes targeting `enterprise/main` when enterprise code, enterprise
+tests, patched Hermes authority seams, or enterprise planning docs change.
+
 ## 13. Enterprise-Off Smoke Contract
 
 Every branch that touches core Hermes files must prove enterprise disabled does
