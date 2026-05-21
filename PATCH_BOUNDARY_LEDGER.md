@@ -34,6 +34,10 @@ Developer Local Fast Path v0 extends the enterprise action-firewall module
 without touching a new mature Hermes core runtime file. It is a scoped allow
 policy for owner workspace file actions, not a break-glass override.
 
+Enterprise Doctor v0 patches `hermes_cli/doctor.py` only to render a diagnostic
+section from the enterprise machine-readable report. It does not add runtime
+authority or change normal Hermes execution behavior.
+
 Upstream base:
 
 ```text

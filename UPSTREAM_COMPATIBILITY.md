@@ -240,6 +240,30 @@ Result:
 60 passed
 ```
 
+Enterprise doctor slice verification:
+
+```text
+python -m pytest -o addopts="" --basetemp .pytest-tmp tests\enterprise\test_enterprise_doctor.py tests\enterprise\test_enterprise_mode_noop.py tests\hermes_cli\test_doctor.py::TestDoctorToolAvailabilityOverrides
+```
+
+Result:
+
+```text
+18 passed
+```
+
+Full enterprise package verification after the enterprise doctor slice:
+
+```text
+python -m pytest -o addopts="" --basetemp .pytest-tmp tests\enterprise
+```
+
+Result:
+
+```text
+66 passed
+```
+
 Additional environment note:
 
 ```text
@@ -301,6 +325,8 @@ The current runtime patches are intentionally small:
 7. One enterprise-module developer local fast-path policy called by the
    existing action-firewall module. This slice does not add a new core Hermes
    patch.
+8. One enterprise doctor diagnostic section in `hermes_cli/doctor.py`. This is
+   a diagnostic CLI patch only and does not add runtime authority.
 
 Enterprise mode remains disabled by default, and focused tests cover
 enterprise-off behavior plus existing tool-loop guardrail behavior.
@@ -308,4 +334,5 @@ enterprise-off behavior plus existing tool-loop guardrail behavior.
 The next meaningful compatibility risks appear when wiring hydration into
 provider or memory paths, adding approved staged execution, provider egress
 policy, memory gates, plugin admission, gateway identity, cron authority, or
-team/admin fast-path assignment management.
+team/admin fast-path assignment management. The Enterprise Doctor v0 patch is
+lower runtime risk because it only reads diagnostic state and reports issues.

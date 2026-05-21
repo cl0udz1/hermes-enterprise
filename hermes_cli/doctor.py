@@ -238,6 +238,37 @@ def _check_gateway_service_linger(issues: list[str]) -> None:
         check_warn("Could not verify systemd linger", f"({linger_detail})")
 
 
+def _check_enterprise_security(issues: list[str]) -> None:
+    """Render enterprise security diagnostics without blocking normal doctor."""
+    _section("Enterprise Security")
+    try:
+        from hermes_cli.config import load_config
+        from enterprise.doctor import EnterpriseDoctorStatus, run_enterprise_doctor
+
+        report = run_enterprise_doctor(
+            root_config=load_config(),
+            hermes_home=HERMES_HOME,
+            project_root=PROJECT_ROOT,
+        )
+    except Exception as exc:
+        check_warn("Enterprise doctor unavailable", f"({exc})")
+        return
+
+    check_info(f"mode={report.mode} enabled={str(report.enabled).lower()} status={report.status.value}")
+    for item in report.checks:
+        detail = f"({item.detail})" if item.detail else ""
+        if item.status is EnterpriseDoctorStatus.PASS:
+            check_ok(item.label, detail)
+        elif item.status is EnterpriseDoctorStatus.WARN:
+            check_warn(item.label, detail)
+        else:
+            check_fail(item.label, detail)
+            issues.append(
+                f"Enterprise security check failed: {item.label}. "
+                f"{item.remediation or item.detail}"
+            )
+
+
 _APIKEY_PROVIDERS_CACHE: list | None = None
 
 
@@ -1938,6 +1969,8 @@ def run_doctor(args):
                 check_warn(f"{_active_memory_provider} plugin not found", "run: hermes memory setup")
         except Exception as _e:
             check_warn(f"{_active_memory_provider} check failed", str(_e))
+
+    _check_enterprise_security(issues)
 
     try:
         from hermes_cli.profiles import list_profiles, _get_wrapper_dir, profile_exists
