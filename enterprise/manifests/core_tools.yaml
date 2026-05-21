@@ -1,0 +1,179 @@
+version: "0.1"
+covered_runtime_surfaces:
+  - tool_execution
+  - tool_result_context
+  - provider_egress
+  - memory
+  - outbound_send
+  - scheduled_execution
+
+tools:
+  terminal:
+    risk_tier: critical
+    side_effects:
+      - process_spawn
+      - filesystem_read
+      - filesystem_write
+      - network_egress
+    sandbox_profile: command_local
+    approval_required: true
+    data_classes: [source, secrets, system]
+    network_access: true
+    notes: "Executes local commands through Hermes terminal backends."
+
+  process:
+    risk_tier: high
+    side_effects:
+      - process_spawn
+    sandbox_profile: process_control
+    approval_required: true
+    data_classes: [system]
+    notes: "Controls or inspects long-running terminal processes."
+
+  execute_code:
+    risk_tier: critical
+    side_effects:
+      - code_execution
+      - filesystem_read
+      - filesystem_write
+      - network_egress
+    sandbox_profile: code_execution
+    approval_required: true
+    data_classes: [source, secrets, system]
+    network_access: true
+    notes: "Runs Python code that can call tools programmatically."
+
+  write_file:
+    risk_tier: high
+    side_effects:
+      - filesystem_write
+    sandbox_profile: workspace_write
+    approval_required: true
+    data_classes: [source, config]
+    notes: "Writes files in the active workspace."
+
+  patch:
+    risk_tier: high
+    side_effects:
+      - filesystem_read
+      - filesystem_write
+    sandbox_profile: workspace_write
+    approval_required: true
+    data_classes: [source, config]
+    notes: "Applies edits to existing files."
+
+  read_file:
+    risk_tier: moderate
+    side_effects:
+      - filesystem_read
+    sandbox_profile: workspace_read
+    data_classes: [source, config, secrets]
+    notes: "Reads local files and can expose sensitive content to model context."
+
+  search_files:
+    risk_tier: moderate
+    side_effects:
+      - filesystem_read
+    sandbox_profile: workspace_read
+    data_classes: [source, config, secrets]
+    notes: "Searches filenames or file contents."
+
+  web_search:
+    risk_tier: moderate
+    side_effects:
+      - network_egress
+    sandbox_profile: network_fetch
+    data_classes: [public]
+    network_access: true
+    notes: "Queries external search backends."
+
+  web_extract:
+    risk_tier: high
+    side_effects:
+      - network_egress
+    sandbox_profile: network_fetch
+    approval_required: true
+    data_classes: [public, untrusted_content]
+    network_access: true
+    notes: "Fetches and extracts untrusted web content."
+
+  browser_navigate:
+    risk_tier: high
+    side_effects:
+      - network_egress
+      - browser_state
+    sandbox_profile: browser_control
+    approval_required: true
+    data_classes: [public, untrusted_content]
+    network_access: true
+    notes: "Navigates a browser session to external content."
+
+  browser_cdp:
+    risk_tier: critical
+    side_effects:
+      - network_egress
+      - browser_state
+      - filesystem_read
+      - filesystem_write
+    sandbox_profile: browser_control
+    approval_required: true
+    data_classes: [public, untrusted_content, secrets]
+    network_access: true
+    notes: "Low-level browser control can inspect state and drive complex actions."
+
+  browser_snapshot:
+    risk_tier: moderate
+    side_effects:
+      - browser_state
+    sandbox_profile: browser_read
+    data_classes: [public, untrusted_content]
+    notes: "Reads browser page state into model context."
+
+  memory:
+    risk_tier: high
+    side_effects:
+      - memory_read
+      - memory_write
+    sandbox_profile: memory_control
+    approval_required: true
+    data_classes: [personal, business, source]
+    notes: "Reads or writes durable memory that can influence future runs."
+
+  send_message:
+    risk_tier: critical
+    side_effects:
+      - external_send
+      - network_egress
+    sandbox_profile: outbound_send
+    approval_required: true
+    data_classes: [business, personal, secrets]
+    network_access: true
+    notes: "Sends content to external messaging platforms."
+
+  cronjob:
+    risk_tier: high
+    side_effects:
+      - scheduled_execution
+    sandbox_profile: scheduled_authority
+    approval_required: true
+    data_classes: [business, source]
+    notes: "Creates or changes scheduled autonomous work."
+
+  delegate_task:
+    risk_tier: high
+    side_effects:
+      - agent_delegation
+      - provider_egress
+    sandbox_profile: agent_delegation
+    approval_required: true
+    data_classes: [business, source, secrets]
+    model_egress: true
+    notes: "Delegates work to subagents with separate context."
+
+  clarify:
+    risk_tier: low
+    side_effects:
+      - user_prompt
+    sandbox_profile: user_prompt
+    data_classes: [business]
+    notes: "Asks the user for clarification without external side effects."
