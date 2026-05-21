@@ -21,6 +21,7 @@ from enterprise.contracts import (
     StagedExecutionRecord,
     stable_hash,
 )
+from enterprise.fast_path import FastPathDecision, apply_developer_fast_path
 from enterprise.manifests import load_core_tool_manifest
 from enterprise.mode import EnterpriseMode
 from enterprise.sandbox import SandboxDecision, evaluate_sandbox
@@ -155,6 +156,15 @@ def evaluate_tool_call(
             extra_findings=sandbox_decision.findings,
         )
     )
+    triage_decision, fast_path_decision = apply_developer_fast_path(
+        triage_decision,
+        subject_id=subject_id,
+        tool_name=tool_name,
+        action_hash=action_hash,
+        capability=capability,
+        sandbox_decision=sandbox_decision,
+        enterprise_cfg=enterprise_cfg,
+    )
 
     staged_record: StagedExecutionRecord | None = None
     staging_error = ""
@@ -196,6 +206,7 @@ def evaluate_tool_call(
             sandbox_decision=sandbox_decision,
             staged_record=staged_record,
             staging_error=staging_error,
+            fast_path_decision=fast_path_decision,
         )
     except Exception as exc:
         if mode.fail_closed_high_risk and triage_decision.risk_tier in {RiskTier.HIGH, RiskTier.CRITICAL}:
@@ -331,6 +342,7 @@ def _append_audit_events(
     sandbox_decision: SandboxDecision,
     staged_record: StagedExecutionRecord | None = None,
     staging_error: str = "",
+    fast_path_decision: FastPathDecision | None = None,
 ) -> tuple[str, ...]:
     created_at = datetime.now(timezone.utc).isoformat()
     raw_sha256 = stable_hash({"tool_name": tool_name, "tool_args": tool_args})
@@ -356,6 +368,10 @@ def _append_audit_events(
         )
     if staging_error:
         base_metadata["staging_error"] = staging_error
+    if fast_path_decision is not None and fast_path_decision.allowed:
+        base_metadata.update(fast_path_decision.metadata)
+        base_metadata["fast_path_detectors"] = list(fast_path_decision.detectors)
+        base_metadata["fast_path_reason"] = fast_path_decision.reason
 
     for event_type in (AuditEventType.ACTION_PROPOSED, AuditEventType.POLICY_DECISION):
         event_id = stable_hash(

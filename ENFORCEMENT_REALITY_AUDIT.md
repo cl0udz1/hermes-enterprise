@@ -49,6 +49,10 @@ Implemented so far:
     artifact views.
 26. Hydration decision audit events that record route, view, budget, data
     class, and allow/deny status without storing raw hydrated content.
+27. Developer Local Fast Path v0 for owner-scoped, sandbox-only, no-egress
+    workspace file actions.
+28. Fast-path audit metadata that records workspace roots, observed side
+    effects, and the explicit fast-path detector on allowed decisions.
 
 Hermes authority seams patched so far:
 
@@ -81,10 +85,11 @@ surfaces:
 | `enterprise/manifests/core_tools.yaml` | Define initial risk metadata for covered high-risk tool families. | None; metadata is not enforced yet. |
 | `agent/tool_executor.py` | Add lazy enterprise preflight before sequential and concurrent tool execution. | Blocks covered tool calls before execution when enterprise mode is enabled. |
 | `agent/tool_dispatch_helpers.py` | Route tool-result message construction through the enterprise result sanitizer. | Sanitizes covered tool output before model-visible context when enterprise mode is enabled. |
-| `enterprise/firewall/action.py` | Feed observed sandbox side effects into triage and emit sandbox violation audit events. | Enforces manifest/profile mismatch checks inside the existing action firewall path. |
+| `enterprise/firewall/action.py` | Feed observed sandbox side effects into triage, apply developer local fast path, and emit sandbox/staging audit events. | Enforces manifest/profile mismatch checks and audited local fast-path decisions inside the existing action firewall path. |
 | `enterprise/sandbox/*` | Define sandbox profiles and v0 observed-intent enforcement. | No direct runtime authority until called by the action firewall. |
 | `enterprise/staging/*` | Store staged approval records and redacted previews for covered side-effecting actions. | No direct runtime authority until called by the action firewall. |
 | `enterprise/artifacts/*` | Store artifact records and enforce explicit hydration views by route and data class. | No direct Hermes runtime authority until provider/memory/artifact consumers call the boundary. |
+| `enterprise/fast_path.py` | Define owner-scoped developer fast-path eligibility for local workspace file actions. | No direct runtime authority until called by the action firewall. |
 
 ## Controls Not Yet Implemented
 
@@ -126,6 +131,8 @@ MVP-0 may claim only what is implemented and tested:
    through explicit metadata, summary, redacted, or full views.
 10. Full artifact hydration is denied for disallowed routes and secret-bearing
     data classes by default.
+11. Owner-scoped local workspace file actions can be auto-allowed when the
+    developer fast path is configured, audited, sandbox-only, and no-egress.
 
 ## Bypass Classes To Track
 
@@ -248,3 +255,25 @@ Context Hydration v0 evidence:
    `tests/enterprise/test_context_hydration.py::test_hydration_denies_full_secret_content_even_on_allowed_route`.
 7. Explicit limitation: MVP-0 does not yet force provider, memory, gateway,
    support-bundle, or workflow code paths through hydration.
+
+Developer Local Fast Path v0 evidence:
+
+1. Enforcement point: `enterprise.firewall.action.evaluate_tool_call(...)`
+   after deterministic triage/sandbox checks and before staged approval.
+2. Policy decision: `enterprise.fast_path.apply_developer_fast_path(...)`
+   can convert eligible local file read/write decisions to allow only when the
+   subject owns the configured workspace root.
+3. Non-bypass rule: the fast path does not override deny/quarantine decisions,
+   sandbox findings, network egress, explicit environment forwarding, process or
+   code execution, secret-looking content, sensitive paths, denied roots, or
+   paths outside the owner workspace.
+4. Audit evidence: action proposal and policy decision events include
+   `fast_path`, `fast_path_detectors`, workspace roots, side effects, and the
+   reason without storing raw file content.
+5. Enterprise-on tests:
+   `tests/enterprise/test_developer_fast_path.py::test_developer_fast_path_allows_owner_workspace_write_and_audits`,
+   `tests/enterprise/test_developer_fast_path.py::test_developer_fast_path_does_not_override_secret_content_denial`,
+   and
+   `tests/enterprise/test_developer_fast_path.py::test_developer_fast_path_does_not_cross_workspace_boundary`.
+6. Explicit limitation: MVP-0 does not yet model full team assignments, SSO
+   identity, project ownership lifecycle, or admin UI for fast-path policy.

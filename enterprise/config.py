@@ -60,6 +60,27 @@ DEFAULT_ENTERPRISE_CONFIG: dict[str, Any] = {
     "developer_fast_path": {
         "enabled": True,
         "no_egress_default": True,
+        "subject_ids": ["local-agent"],
+        "workspace_roots": [],
+        "owner_workspace_roots": {},
+        "allowed_tools": ["read_file", "search_files", "write_file", "patch"],
+        "allowed_side_effects": ["filesystem_read", "filesystem_write"],
+        "denied_path_markers": [
+            ".env",
+            ".pem",
+            ".key",
+            ".p12",
+            "id_rsa",
+            "id_dsa",
+            "secrets",
+            "credentials",
+            "credential",
+            "token",
+            "production",
+            "prod",
+            ".kube",
+            "terraform.tfstate",
+        ],
     },
 }
 
