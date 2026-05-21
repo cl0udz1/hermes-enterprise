@@ -18,9 +18,15 @@ Implemented so far:
 3. Runtime contract dataclasses with deterministic JSON/hashing.
 4. Local SQLite audit store skeleton for structured events.
 5. Capability manifest schema and default core tool manifest.
-6. Enterprise tests for contracts, config defaults, import no-op behavior, and
+6. Deterministic runtime triage engine for manifest, secret, path, network, and
+   grant checks.
+7. Small policy decision cache keyed by policy version, action hash, subject,
+   tool, data classes, and expiry.
+8. Enterprise tests for contracts, config defaults, import no-op behavior, and
    audit store append/list behavior.
-7. Enterprise tests for manifest loading and required high-risk tool coverage.
+9. Enterprise tests for manifest loading and required high-risk tool coverage.
+10. Enterprise tests for deterministic triage denial/approval paths and cache
+    expiry.
 
 No Hermes authority seam has been patched yet.
 

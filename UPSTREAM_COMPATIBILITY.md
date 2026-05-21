@@ -84,6 +84,18 @@ Environment notes:
 Capability manifest slice verification should use the same targeted command and
 must include `tests\enterprise\test_manifests.py`.
 
+Deterministic triage slice verification:
+
+```text
+python -m pytest -o addopts="" --basetemp .pytest-tmp tests\enterprise
+```
+
+Result:
+
+```text
+25 passed
+```
+
 Before the first runtime authority patch, also record:
 
 1. Python executable path.
