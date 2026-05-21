@@ -53,6 +53,11 @@ Implemented so far:
     workspace file actions.
 28. Fast-path audit metadata that records workspace roots, observed side
     effects, and the explicit fast-path detector on allowed decisions.
+29. Enterprise Doctor v0 with machine-readable checks for enterprise mode,
+    audit storage, firewall hook presence, manifests, triage latency config,
+    sandbox profiles, result sanitizer, and streaming-policy readiness.
+30. Hermes doctor renders an Enterprise Security section and reports team,
+    enterprise, or regulated missing critical controls as actionable issues.
 
 Hermes authority seams patched so far:
 
@@ -90,6 +95,8 @@ surfaces:
 | `enterprise/staging/*` | Store staged approval records and redacted previews for covered side-effecting actions. | No direct runtime authority until called by the action firewall. |
 | `enterprise/artifacts/*` | Store artifact records and enforce explicit hydration views by route and data class. | No direct Hermes runtime authority until provider/memory/artifact consumers call the boundary. |
 | `enterprise/fast_path.py` | Define owner-scoped developer fast-path eligibility for local workspace file actions. | No direct runtime authority until called by the action firewall. |
+| `enterprise/doctor.py` | Produce machine-readable enterprise health checks. | Diagnostic only; does not enforce runtime authority. |
+| `hermes_cli/doctor.py` | Render an Enterprise Security section from the enterprise doctor report. | Diagnostic only; no runtime enforcement change. |
 
 ## Controls Not Yet Implemented
 
@@ -112,6 +119,8 @@ These are not real yet:
 13. Full semantic DLP/prompt-injection classification beyond deterministic
     sanitizer patterns.
 14. OS/container-level syscall, filesystem, and network sandbox enforcement.
+15. Fully implemented provider streaming scanner; Enterprise Doctor reports it
+    as warning in Developer Secure mode and failure in team/enterprise modes.
 
 ## First Enforcement Claims Allowed After MVP-0
 
@@ -133,6 +142,8 @@ MVP-0 may claim only what is implemented and tested:
     data classes by default.
 11. Owner-scoped local workspace file actions can be auto-allowed when the
     developer fast path is configured, audited, sandbox-only, and no-egress.
+12. Enterprise Doctor can report implemented enterprise controls and flag
+    missing critical controls before team rollout.
 
 ## Bypass Classes To Track
 
@@ -277,3 +288,25 @@ Developer Local Fast Path v0 evidence:
    `tests/enterprise/test_developer_fast_path.py::test_developer_fast_path_does_not_cross_workspace_boundary`.
 6. Explicit limitation: MVP-0 does not yet model full team assignments, SSO
    identity, project ownership lifecycle, or admin UI for fast-path policy.
+
+Enterprise Doctor v0 evidence:
+
+1. Enforcement point: none; this is diagnostic support, not a runtime gate.
+2. Machine-readable report:
+   `enterprise.doctor.run_enterprise_doctor(...).to_dict()` returns overall
+   status, mode, enabled flag, and per-check status/detail/remediation.
+3. Human CLI surface: `hermes_cli.doctor._check_enterprise_security(...)`
+   renders the Enterprise Security section in `hermes doctor`.
+4. Critical checks: enterprise mode config, audit store, action firewall hook,
+   capability manifest loading, triage latency config, sandbox profile coverage,
+   result sanitizer, and streaming policy readiness.
+5. Fail-closed posture: missing critical controls fail in team, enterprise, or
+   regulated mode; Developer Secure can warn for incomplete future controls.
+6. Tests:
+   `tests/enterprise/test_enterprise_doctor.py::test_enterprise_doctor_team_fails_missing_streaming_policy`,
+   `tests/enterprise/test_enterprise_doctor.py::test_enterprise_doctor_detects_manifest_loader_failure`,
+   and
+   `tests/enterprise/test_enterprise_doctor.py::test_hermes_cli_renders_enterprise_doctor_section`.
+7. Explicit limitation: Doctor does not replace enforcement, SIEM export,
+   tamper-evident storage, provider egress policy, or admin dashboard health
+   management.
