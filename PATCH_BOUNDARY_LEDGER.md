@@ -26,6 +26,10 @@ Staged Execution v0 also extends the enterprise action-firewall module without
 touching a new mature Hermes core runtime file. It records approval artifacts
 for covered side effects, but does not add approved execution or rollback.
 
+Context Hydration v0 adds enterprise artifact modules only. It does not patch a
+new mature Hermes core runtime file and does not yet force provider, memory, or
+gateway paths through the hydration boundary.
+
 Upstream base:
 
 ```text

@@ -14,6 +14,7 @@ def test_enterprise_defaults_disabled_in_hermes_config():
     assert enterprise_cfg["edition"] == "developer_secure"
     assert enterprise_cfg["fail_closed_high_risk"] is True
     assert enterprise_cfg["triage"]["llm_evaluator_enabled"] is False
+    assert enterprise_cfg["hydration"]["full_allowed_routes"] == ["local", "local-model", "trusted-local"]
 
 
 def test_load_config_includes_enterprise_defaults_without_user_config():
@@ -21,6 +22,7 @@ def test_load_config_includes_enterprise_defaults_without_user_config():
 
     assert cfg["enterprise"]["enabled"] is False
     assert cfg["enterprise"]["developer_fast_path"]["enabled"] is True
+    assert cfg["enterprise"]["hydration"]["enabled"] is True
     assert validate_config_structure(cfg) == []
 
 
@@ -50,6 +52,7 @@ def test_enterprise_config_deep_merges_user_overrides():
     assert cfg["triage"]["low_risk_latency_budget_ms"] == 25
     assert cfg["triage"]["llm_evaluator_enabled"] is False
     assert cfg["sandbox"] == DEFAULT_ENTERPRISE_CONFIG["sandbox"]
+    assert cfg["hydration"] == DEFAULT_ENTERPRISE_CONFIG["hydration"]
 
 
 def test_enterprise_import_does_not_create_runtime_state(monkeypatch, tmp_path):

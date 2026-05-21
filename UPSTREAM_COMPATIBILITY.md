@@ -192,6 +192,30 @@ Result:
 48 passed
 ```
 
+Context hydration slice verification:
+
+```text
+python -m pytest -o addopts="" --basetemp .pytest-tmp tests\enterprise\test_context_hydration.py tests\enterprise\test_contracts.py tests\enterprise\test_enterprise_mode_noop.py
+```
+
+Result:
+
+```text
+15 passed
+```
+
+Full enterprise package verification after the context hydration slice:
+
+```text
+python -m pytest -o addopts="" --basetemp .pytest-tmp tests\enterprise
+```
+
+Result:
+
+```text
+54 passed
+```
+
 Additional environment note:
 
 ```text
@@ -248,10 +272,12 @@ The current runtime patches are intentionally small:
 5. One enterprise-module extension that records staged approval artifacts for
    covered approval-required side effects. This slice does not add a new core
    Hermes patch.
+6. One enterprise-module artifact vault and hydration boundary. This slice does
+   not add a new core Hermes patch.
 
 Enterprise mode remains disabled by default, and focused tests cover
 enterprise-off behavior plus existing tool-loop guardrail behavior.
 
-The next meaningful compatibility risks appear when adding approved staged
-execution, provider egress policy, memory gates, plugin admission, gateway
-identity, or cron authority.
+The next meaningful compatibility risks appear when wiring hydration into
+provider or memory paths, adding approved staged execution, provider egress
+policy, memory gates, plugin admission, gateway identity, or cron authority.

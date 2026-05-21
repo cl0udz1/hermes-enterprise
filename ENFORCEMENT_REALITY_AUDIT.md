@@ -44,6 +44,11 @@ Implemented so far:
 22. Deterministic stage records with action hashes, preview URIs, idempotency
     keys, and redacted approval previews.
 23. Action staged audit events for staged approval-required decisions.
+24. Artifact Vault v0 for local report, diff, and evidence records.
+25. Context Hydration Boundary v0 for metadata, summary, redacted, and full
+    artifact views.
+26. Hydration decision audit events that record route, view, budget, data
+    class, and allow/deny status without storing raw hydrated content.
 
 Hermes authority seams patched so far:
 
@@ -65,7 +70,7 @@ surfaces:
 | Plugins | Hermes can load third-party tools/hooks. | Add manifest and trust admission. |
 | Gateway | Hermes exposes messaging/platform authority. | Add identity binding and assignment policy. |
 | Cron | Hermes can run scheduled work. | Add owner, intent, expiry, and policy wrapper. |
-| Artifacts | Planned enterprise evidence and data objects. | Add vault and hydration boundary. |
+| Artifacts | Enterprise artifact vault and hydration boundary exist as v0 modules. | Wire provider, memory, support bundle, and workflow paths through hydration in later slices. |
 
 ## Current Hermes Files Touched
 
@@ -79,6 +84,7 @@ surfaces:
 | `enterprise/firewall/action.py` | Feed observed sandbox side effects into triage and emit sandbox violation audit events. | Enforces manifest/profile mismatch checks inside the existing action firewall path. |
 | `enterprise/sandbox/*` | Define sandbox profiles and v0 observed-intent enforcement. | No direct runtime authority until called by the action firewall. |
 | `enterprise/staging/*` | Store staged approval records and redacted previews for covered side-effecting actions. | No direct runtime authority until called by the action firewall. |
+| `enterprise/artifacts/*` | Store artifact records and enforce explicit hydration views by route and data class. | No direct Hermes runtime authority until provider/memory/artifact consumers call the boundary. |
 
 ## Controls Not Yet Implemented
 
@@ -90,8 +96,9 @@ These are not real yet:
 3. Provider egress gateway.
 4. Secret broker.
 5. Access Broker.
-6. Artifact Vault.
-7. Context Hydration Boundary.
+6. Provider/memory/runtime integration with the Artifact Vault and Context
+   Hydration Boundary.
+7. Durable encrypted artifact storage and tenant-scoped artifact isolation.
 8. Managed agent fleet controller.
 9. Agent Builder.
 10. SIEM export.
@@ -115,6 +122,10 @@ MVP-0 may claim only what is implemented and tested:
    side effects before execution.
 8. Covered approval-required side effects create staged records before
    execution is blocked pending approval.
+9. Artifact records can be stored behind `artifact://...` URIs and hydrated only
+   through explicit metadata, summary, redacted, or full views.
+10. Full artifact hydration is denied for disallowed routes and secret-bearing
+    data classes by default.
 
 ## Bypass Classes To Track
 
@@ -216,3 +227,24 @@ Staged Execution v0 evidence:
    `tests/enterprise/test_staged_execution.py::test_stage_preview_redacts_secret_like_values`.
 6. Explicit limitation: MVP-0 does not execute approved staged actions and does
    not claim rollback for irreversible side effects.
+
+Context Hydration v0 evidence:
+
+1. Enforcement point: `enterprise.artifacts.hydration.hydrate_context(...)`
+   before artifact content is released from `ArtifactVault`.
+2. Policy decision: route, requested view, data class, and byte budget decide
+   whether metadata, summary, redacted, or full content can be returned.
+3. Unauthorized full hydration: full content is denied for provider-style routes
+   outside `enterprise.hydration.full_allowed_routes`.
+4. Secret-bearing content: full hydration is denied for configured secret data
+   classes by default; redacted hydration removes deterministic secret patterns.
+5. Audit evidence: `hydration_decision` events record view, route, budget,
+   data class, allow/deny status, and content hash without storing raw hydrated
+   content.
+6. Enterprise-on tests:
+   `tests/enterprise/test_context_hydration.py::test_hydration_denies_full_content_to_provider_route_and_audits`,
+   `tests/enterprise/test_context_hydration.py::test_hydration_allows_redacted_view_without_secret_leak`,
+   and
+   `tests/enterprise/test_context_hydration.py::test_hydration_denies_full_secret_content_even_on_allowed_route`.
+7. Explicit limitation: MVP-0 does not yet force provider, memory, gateway,
+   support-bundle, or workflow code paths through hydration.

@@ -22,6 +22,24 @@ DEFAULT_ENTERPRISE_CONFIG: dict[str, Any] = {
         "backend": "sqlite",
         "enabled": True,
     },
+    "artifacts": {
+        "backend": "sqlite",
+        "max_preview_chars": 500,
+    },
+    "hydration": {
+        "enabled": True,
+        "default_budget_bytes": 4096,
+        "view_budgets": {
+            "metadata": 0,
+            "summary": 1024,
+            "redacted": 4096,
+            "full": 8192,
+        },
+        "full_allowed_routes": ["local", "local-model", "trusted-local"],
+        "denied_routes": [],
+        "secret_data_classes": ["secrets", "credentials", "tokens", "private_key"],
+        "allow_secret_full": False,
+    },
     "policy": {
         "bundle_path": None,
     },

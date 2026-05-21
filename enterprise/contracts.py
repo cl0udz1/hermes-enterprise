@@ -37,6 +37,7 @@ class AuditEventType(str, Enum):
     ACTION_EXECUTED = "action_executed"
     RESULT_SANITIZED = "result_sanitized"
     SANDBOX_VIOLATION = "sandbox_violation"
+    HYDRATION_DECISION = "hydration_decision"
     AUDIT_ERROR = "audit_error"
 
 
