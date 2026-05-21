@@ -1,0 +1,41 @@
+name: Enterprise control
+description: Track a concrete enterprise security or governance control.
+title: "[Control]: "
+labels:
+  - security-boundary
+body:
+  - type: textarea
+    id: control
+    attributes:
+      label: Control
+      description: What control should exist?
+      placeholder: Provider egress wrapper blocks secret-bearing payloads before external model calls.
+    validations:
+      required: true
+  - type: textarea
+    id: enforcement-point
+    attributes:
+      label: Enforcement point
+      description: Where must the control run?
+      placeholder: agent/transports/* before provider request construction.
+    validations:
+      required: true
+  - type: textarea
+    id: release-gate
+    attributes:
+      label: Release gate
+      description: What test proves this control?
+      placeholder: Synthetic secret never reaches fake provider payload in streaming and non-streaming paths.
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Boundaries
+      options:
+        - label: Enterprise mode remains disabled by default.
+          required: true
+        - label: Any Hermes core patch updates PATCH_BOUNDARY_LEDGER.md.
+          required: true
+        - label: Claims are added only after tests prove them.
+          required: true

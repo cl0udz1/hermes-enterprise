@@ -1,0 +1,38 @@
+name: Upstream sync
+description: Track syncing enterprise/main with upstream Hermes.
+title: "[Upstream Sync]: "
+labels:
+  - upstream-compat
+body:
+  - type: input
+    id: upstream-ref
+    attributes:
+      label: Upstream ref
+      placeholder: NousResearch/hermes-agent@<sha-or-tag>
+    validations:
+      required: true
+  - type: textarea
+    id: conflicts
+    attributes:
+      label: Conflicts or touched seams
+      description: List any conflicts, especially around patched authority seams.
+      placeholder: agent/tool_executor.py, agent/tool_dispatch_helpers.py, hermes_cli/doctor.py
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification
+      value: |
+        python scripts/enterprise_mvp0_gate.py
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: enterprise/main was updated from a clean upstream mirror branch.
+          required: true
+        - label: Enterprise-off behavior was verified.
+          required: true
+        - label: UPSTREAM_COMPATIBILITY.md was updated with the result.
+          required: true

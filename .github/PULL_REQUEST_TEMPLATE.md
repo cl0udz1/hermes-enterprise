@@ -22,6 +22,24 @@ Fixes #
 - [ ] ♻️ Refactor (no behavior change)
 - [ ] 🎯 New skill (bundled or hub)
 
+## Enterprise Fork Checklist
+
+<!-- Required for downstream work targeting enterprise/main. Mark N/A for upstream-mirror-only PRs. -->
+
+- [ ] This PR targets `enterprise/main` unless it is an upstream mirror/sync PR.
+- [ ] This PR does not target `main` unless it is keeping the clean upstream mirror in sync.
+- [ ] Enterprise mode remains disabled by default.
+- [ ] Any mature Hermes runtime file touched is listed in `PATCH_BOUNDARY_LEDGER.md` — or N/A.
+- [ ] Product/security claims are reflected in `ENFORCEMENT_REALITY_AUDIT.md` — or N/A.
+- [ ] Upstream compatibility impact is reflected in `UPSTREAM_COMPATIBILITY.md` — or N/A.
+- [ ] This PR does not claim provider, gateway, memory, plugin, cron, tenant, SIEM, KMS, secret-broker, or production-enterprise readiness unless code and tests implement it.
+
+Enterprise gate, when relevant:
+
+```text
+python scripts/enterprise_mvp0_gate.py
+```
+
 ## Changes Made
 
 <!-- List the specific changes. Include file paths for code changes. -->
@@ -72,4 +90,3 @@ Fixes #
 ## Screenshots / Logs
 
 <!-- If applicable, add screenshots or log output showing the fix/feature in action. -->
-
