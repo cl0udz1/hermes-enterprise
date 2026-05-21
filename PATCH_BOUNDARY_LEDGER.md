@@ -22,6 +22,10 @@ not patch provider egress, memory, gateway, plugin admission, or cron authority.
 Sandbox Enforcement v0 extends the existing enterprise action-firewall module
 without touching a new mature Hermes core runtime file.
 
+Staged Execution v0 also extends the enterprise action-firewall module without
+touching a new mature Hermes core runtime file. It records approval artifacts
+for covered side effects, but does not add approved execution or rollback.
+
 Upstream base:
 
 ```text

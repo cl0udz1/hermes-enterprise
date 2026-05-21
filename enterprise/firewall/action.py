@@ -18,11 +18,17 @@ from enterprise.contracts import (
     DecisionOutcome,
     RiskTier,
     RuntimeTriageDecision,
+    StagedExecutionRecord,
     stable_hash,
 )
 from enterprise.manifests import load_core_tool_manifest
 from enterprise.mode import EnterpriseMode
 from enterprise.sandbox import SandboxDecision, evaluate_sandbox
+from enterprise.staging import (
+    StageStore,
+    build_staged_execution_record,
+    should_stage_action,
+)
 from enterprise.triage import RuntimeTriageEngine, TriageRequest
 
 
@@ -35,6 +41,7 @@ class ActionFirewallDecision:
     triage_decision: RuntimeTriageDecision | None = None
     action_hash: str = ""
     audit_event_ids: tuple[str, ...] = ()
+    staged_record: StagedExecutionRecord | None = None
 
     @classmethod
     def allow(
@@ -43,12 +50,14 @@ class ActionFirewallDecision:
         triage_decision: RuntimeTriageDecision | None = None,
         action_hash: str = "",
         audit_event_ids: tuple[str, ...] = (),
+        staged_record: StagedExecutionRecord | None = None,
     ) -> "ActionFirewallDecision":
         return cls(
             allows_execution=True,
             triage_decision=triage_decision,
             action_hash=action_hash,
             audit_event_ids=audit_event_ids,
+            staged_record=staged_record,
         )
 
     @classmethod
@@ -59,6 +68,7 @@ class ActionFirewallDecision:
         triage_decision: RuntimeTriageDecision | None = None,
         action_hash: str = "",
         audit_event_ids: tuple[str, ...] = (),
+        staged_record: StagedExecutionRecord | None = None,
     ) -> "ActionFirewallDecision":
         return cls(
             allows_execution=False,
@@ -66,6 +76,7 @@ class ActionFirewallDecision:
             triage_decision=triage_decision,
             action_hash=action_hash,
             audit_event_ids=audit_event_ids,
+            staged_record=staged_record,
         )
 
 
@@ -78,6 +89,7 @@ def evaluate_tool_call(
     tool_call_id: str = "",
     root_config: Mapping[str, Any] | None = None,
     audit_store: AuditStore | None = None,
+    stage_store: StageStore | None = None,
 ) -> ActionFirewallDecision:
     """Evaluate a proposed tool call before any side effect can run.
 
@@ -144,6 +156,33 @@ def evaluate_tool_call(
         )
     )
 
+    staged_record: StagedExecutionRecord | None = None
+    staging_error = ""
+    staging_cfg = enterprise_cfg.get("staging", {})
+    if not isinstance(staging_cfg, Mapping):
+        staging_cfg = {}
+    staging_enabled = bool(staging_cfg.get("enabled", True))
+    if staging_enabled and should_stage_action(
+        triage_decision,
+        capability=capability,
+        requested_side_effects=requested_side_effects,
+    ):
+        try:
+            candidate_record, stage_preview = build_staged_execution_record(
+                subject_id=subject_id,
+                tool_name=tool_name,
+                tool_args=args,
+                action_hash=action_hash,
+                triage_decision=triage_decision,
+                requested_side_effects=requested_side_effects,
+                capability=capability,
+            )
+            (stage_store or StageStore()).upsert_record(candidate_record, stage_preview)
+            staged_record = candidate_record
+        except Exception as exc:
+            staged_record = None
+            staging_error = str(exc)
+
     try:
         audit_event_ids = _append_audit_events(
             audit_store or AuditStore(),
@@ -155,6 +194,8 @@ def evaluate_tool_call(
             action_hash=action_hash,
             triage_decision=triage_decision,
             sandbox_decision=sandbox_decision,
+            staged_record=staged_record,
+            staging_error=staging_error,
         )
     except Exception as exc:
         if mode.fail_closed_high_risk and triage_decision.risk_tier in {RiskTier.HIGH, RiskTier.CRITICAL}:
@@ -164,17 +205,36 @@ def evaluate_tool_call(
                     action_hash=action_hash,
                     triage_decision=triage_decision,
                     audit_error=str(exc),
+                    staged_record=staged_record,
+                    staging_error=staging_error,
                 ),
                 triage_decision=triage_decision,
                 action_hash=action_hash,
+                staged_record=staged_record,
             )
         audit_event_ids = ()
+
+    if staging_error and mode.fail_closed_high_risk and triage_decision.risk_tier in {RiskTier.HIGH, RiskTier.CRITICAL}:
+        return ActionFirewallDecision.block(
+            _blocked_tool_result(
+                tool_name=tool_name,
+                action_hash=action_hash,
+                triage_decision=triage_decision,
+                staged_record=staged_record,
+                staging_error=staging_error,
+            ),
+            triage_decision=triage_decision,
+            action_hash=action_hash,
+            audit_event_ids=audit_event_ids,
+            staged_record=staged_record,
+        )
 
     if triage_decision.outcome is DecisionOutcome.ALLOW:
         return ActionFirewallDecision.allow(
             triage_decision=triage_decision,
             action_hash=action_hash,
             audit_event_ids=audit_event_ids,
+            staged_record=staged_record,
         )
 
     return ActionFirewallDecision.block(
@@ -182,10 +242,13 @@ def evaluate_tool_call(
             tool_name=tool_name,
             action_hash=action_hash,
             triage_decision=triage_decision,
+            staged_record=staged_record,
+            staging_error=staging_error,
         ),
         triage_decision=triage_decision,
         action_hash=action_hash,
         audit_event_ids=audit_event_ids,
+        staged_record=staged_record,
     )
 
 
@@ -266,11 +329,34 @@ def _append_audit_events(
     action_hash: str,
     triage_decision: RuntimeTriageDecision,
     sandbox_decision: SandboxDecision,
+    staged_record: StagedExecutionRecord | None = None,
+    staging_error: str = "",
 ) -> tuple[str, ...]:
     created_at = datetime.now(timezone.utc).isoformat()
     raw_sha256 = stable_hash({"tool_name": tool_name, "tool_args": tool_args})
     preview = _redacted_preview(tool_name, tool_args)
     event_ids = []
+    base_metadata = {
+        "tool_name": tool_name,
+        "task_id": task_id,
+        "tool_call_id": tool_call_id,
+        "outcome": triage_decision.outcome.value,
+        "risk_tier": triage_decision.risk_tier.value,
+        "detectors": list(triage_decision.detectors),
+        "latency_ms": triage_decision.latency_ms,
+    }
+    if staged_record is not None:
+        base_metadata.update(
+            {
+                "stage_id": staged_record.stage_id,
+                "preview_uri": staged_record.preview_uri,
+                "idempotency_key": staged_record.idempotency_key,
+                "stage_status": staged_record.status.value,
+            }
+        )
+    if staging_error:
+        base_metadata["staging_error"] = staging_error
+
     for event_type in (AuditEventType.ACTION_PROPOSED, AuditEventType.POLICY_DECISION):
         event_id = stable_hash(
             {
@@ -290,15 +376,31 @@ def _append_audit_events(
                 redacted_preview=preview,
                 raw_sha256=raw_sha256,
                 created_at=created_at,
-                metadata={
-                    "tool_name": tool_name,
-                    "task_id": task_id,
-                    "tool_call_id": tool_call_id,
-                    "outcome": triage_decision.outcome.value,
-                    "risk_tier": triage_decision.risk_tier.value,
-                    "detectors": list(triage_decision.detectors),
-                    "latency_ms": triage_decision.latency_ms,
-                },
+                metadata=dict(base_metadata),
+            )
+        )
+        event_ids.append(event_id)
+    if staged_record is not None:
+        event_id = stable_hash(
+            {
+                "event_type": AuditEventType.ACTION_STAGED.value,
+                "action_hash": action_hash,
+                "decision_id": triage_decision.decision_id,
+                "stage_id": staged_record.stage_id,
+                "created_at": created_at,
+            }
+        )[:32]
+        audit_store.append_event(
+            AuditEvent(
+                event_id=event_id,
+                event_type=AuditEventType.ACTION_STAGED,
+                subject_id=subject_id,
+                action_id=action_hash,
+                decision_id=triage_decision.decision_id,
+                redacted_preview=f"{tool_name} staged at {staged_record.preview_uri}",
+                raw_sha256=raw_sha256,
+                created_at=created_at,
+                metadata=dict(base_metadata),
             )
         )
         event_ids.append(event_id)
@@ -353,8 +455,14 @@ def _blocked_tool_result(
     action_hash: str,
     triage_decision: RuntimeTriageDecision,
     audit_error: str = "",
+    staged_record: StagedExecutionRecord | None = None,
+    staging_error: str = "",
 ) -> str:
-    if triage_decision.outcome is DecisionOutcome.APPROVAL_REQUIRED:
+    if staging_error:
+        error = "Enterprise action firewall could not stage this high-risk action; execution was denied."
+    elif staged_record is not None:
+        error = "Enterprise action firewall staged this action for approval before execution."
+    elif triage_decision.outcome is DecisionOutcome.APPROVAL_REQUIRED:
         error = "Enterprise action firewall requires approval before executing this tool."
     else:
         error = "Enterprise action firewall blocked tool execution."
@@ -375,4 +483,13 @@ def _blocked_tool_result(
     }
     if audit_error:
         payload["enterprise"]["audit_error"] = audit_error
+    if staged_record is not None:
+        payload["enterprise"]["stage"] = {
+            "stage_id": staged_record.stage_id,
+            "preview_uri": staged_record.preview_uri,
+            "idempotency_key": staged_record.idempotency_key,
+            "status": staged_record.status.value,
+        }
+    if staging_error:
+        payload["enterprise"]["staging_error"] = staging_error
     return json.dumps(payload, ensure_ascii=False)

@@ -168,6 +168,30 @@ Result:
 42 passed
 ```
 
+Staged execution slice verification:
+
+```text
+python -m pytest -o addopts="" --basetemp .pytest-tmp tests\enterprise\test_staged_execution.py tests\enterprise\test_action_firewall.py tests\enterprise\test_contracts.py
+```
+
+Result:
+
+```text
+15 passed
+```
+
+Full enterprise package verification after the staged execution slice:
+
+```text
+python -m pytest -o addopts="" --basetemp .pytest-tmp tests\enterprise
+```
+
+Result:
+
+```text
+48 passed
+```
+
 Additional environment note:
 
 ```text
@@ -221,10 +245,13 @@ The current runtime patches are intentionally small:
 4. One enterprise-module extension that feeds sandbox observed side effects into
    the existing action-firewall triage path. This slice does not add a new core
    Hermes patch.
+5. One enterprise-module extension that records staged approval artifacts for
+   covered approval-required side effects. This slice does not add a new core
+   Hermes patch.
 
 Enterprise mode remains disabled by default, and focused tests cover
 enterprise-off behavior plus existing tool-loop guardrail behavior.
 
-The next meaningful compatibility risks appear when adding staged execution,
-provider egress policy, memory gates, plugin admission, gateway identity, or
-cron authority.
+The next meaningful compatibility risks appear when adding approved staged
+execution, provider egress policy, memory gates, plugin admission, gateway
+identity, or cron authority.

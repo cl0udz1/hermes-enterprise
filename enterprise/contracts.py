@@ -33,6 +33,7 @@ class AuditEventType(str, Enum):
     POLICY_DECISION = "policy_decision"
     ACTION_DENIED = "action_denied"
     ACTION_APPROVED = "action_approved"
+    ACTION_STAGED = "action_staged"
     ACTION_EXECUTED = "action_executed"
     RESULT_SANITIZED = "result_sanitized"
     SANDBOX_VIOLATION = "sandbox_violation"

@@ -40,6 +40,10 @@ Implemented so far:
 19. Sandbox violation audit events with redacted previews and observed side
     effect metadata.
 20. Enterprise-off and enterprise-on tests for sandbox profile violations.
+21. Staged Execution v0 for covered approval-required side effects.
+22. Deterministic stage records with action hashes, preview URIs, idempotency
+    keys, and redacted approval previews.
+23. Action staged audit events for staged approval-required decisions.
 
 Hermes authority seams patched so far:
 
@@ -74,13 +78,14 @@ surfaces:
 | `agent/tool_dispatch_helpers.py` | Route tool-result message construction through the enterprise result sanitizer. | Sanitizes covered tool output before model-visible context when enterprise mode is enabled. |
 | `enterprise/firewall/action.py` | Feed observed sandbox side effects into triage and emit sandbox violation audit events. | Enforces manifest/profile mismatch checks inside the existing action firewall path. |
 | `enterprise/sandbox/*` | Define sandbox profiles and v0 observed-intent enforcement. | No direct runtime authority until called by the action firewall. |
+| `enterprise/staging/*` | Store staged approval records and redacted previews for covered side-effecting actions. | No direct runtime authority until called by the action firewall. |
 
 ## Controls Not Yet Implemented
 
 These are not real yet:
 
-1. Approval queue/staged execution for Action Firewall approval-required
-   decisions.
+1. Approval queue, approval UI/API, and approved execution workflow for staged
+   Action Firewall decisions.
 2. Agentic WAF.
 3. Provider egress gateway.
 4. Secret broker.
@@ -108,6 +113,8 @@ MVP-0 may claim only what is implemented and tested:
 6. Enterprise-off compatibility is tested for touched paths.
 7. Covered tool calls are checked against declared sandbox profiles and observed
    side effects before execution.
+8. Covered approval-required side effects create staged records before
+   execution is blocked pending approval.
 
 ## Bypass Classes To Track
 
@@ -191,3 +198,21 @@ Sandbox Enforcement v0 evidence:
    `tests/enterprise/test_sandbox_enforcement.py::test_action_firewall_denies_sandbox_violation_and_audits`
    and
    `tests/enterprise/test_sandbox_enforcement.py::test_action_firewall_sandbox_env_violation_does_not_leak_secret`.
+
+Staged Execution v0 evidence:
+
+1. Enforcement point: `enterprise.firewall.action.evaluate_tool_call(...)`
+   after deterministic triage and before a blocked approval-required tool
+   result is returned.
+2. Policy decision: `enterprise.staging.should_stage_action(...)` stages only
+   covered approval-required side effects.
+3. Approval binding: `StagedExecutionRecord` stores the action hash, preview
+   URI, idempotency key, subject, tool name, and status.
+4. Redacted previews only: stage previews include safe argument keys and
+   deterministic redaction, not full write content or raw fake API keys.
+5. Enterprise-on tests:
+   `tests/enterprise/test_staged_execution.py::test_action_firewall_stages_approval_required_tool_and_audits`
+   and
+   `tests/enterprise/test_staged_execution.py::test_stage_preview_redacts_secret_like_values`.
+6. Explicit limitation: MVP-0 does not execute approved staged actions and does
+   not claim rollback for irreversible side effects.
