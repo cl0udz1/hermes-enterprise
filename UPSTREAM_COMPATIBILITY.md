@@ -216,6 +216,30 @@ Result:
 54 passed
 ```
 
+Developer local fast path slice verification:
+
+```text
+python -m pytest -o addopts="" --basetemp .pytest-tmp tests\enterprise\test_developer_fast_path.py tests\enterprise\test_action_firewall.py tests\enterprise\test_enterprise_mode_noop.py
+```
+
+Result:
+
+```text
+18 passed
+```
+
+Full enterprise package verification after the developer local fast path slice:
+
+```text
+python -m pytest -o addopts="" --basetemp .pytest-tmp tests\enterprise
+```
+
+Result:
+
+```text
+60 passed
+```
+
 Additional environment note:
 
 ```text
@@ -274,10 +298,14 @@ The current runtime patches are intentionally small:
    Hermes patch.
 6. One enterprise-module artifact vault and hydration boundary. This slice does
    not add a new core Hermes patch.
+7. One enterprise-module developer local fast-path policy called by the
+   existing action-firewall module. This slice does not add a new core Hermes
+   patch.
 
 Enterprise mode remains disabled by default, and focused tests cover
 enterprise-off behavior plus existing tool-loop guardrail behavior.
 
 The next meaningful compatibility risks appear when wiring hydration into
 provider or memory paths, adding approved staged execution, provider egress
-policy, memory gates, plugin admission, gateway identity, or cron authority.
+policy, memory gates, plugin admission, gateway identity, cron authority, or
+team/admin fast-path assignment management.

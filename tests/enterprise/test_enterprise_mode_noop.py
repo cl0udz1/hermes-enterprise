@@ -22,6 +22,7 @@ def test_load_config_includes_enterprise_defaults_without_user_config():
 
     assert cfg["enterprise"]["enabled"] is False
     assert cfg["enterprise"]["developer_fast_path"]["enabled"] is True
+    assert cfg["enterprise"]["developer_fast_path"]["owner_workspace_roots"] == {}
     assert cfg["enterprise"]["hydration"]["enabled"] is True
     assert validate_config_structure(cfg) == []
 
@@ -53,6 +54,7 @@ def test_enterprise_config_deep_merges_user_overrides():
     assert cfg["triage"]["llm_evaluator_enabled"] is False
     assert cfg["sandbox"] == DEFAULT_ENTERPRISE_CONFIG["sandbox"]
     assert cfg["hydration"] == DEFAULT_ENTERPRISE_CONFIG["hydration"]
+    assert cfg["developer_fast_path"] == DEFAULT_ENTERPRISE_CONFIG["developer_fast_path"]
 
 
 def test_enterprise_import_does_not_create_runtime_state(monkeypatch, tmp_path):

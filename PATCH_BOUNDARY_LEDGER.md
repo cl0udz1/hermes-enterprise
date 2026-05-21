@@ -30,6 +30,10 @@ Context Hydration v0 adds enterprise artifact modules only. It does not patch a
 new mature Hermes core runtime file and does not yet force provider, memory, or
 gateway paths through the hydration boundary.
 
+Developer Local Fast Path v0 extends the enterprise action-firewall module
+without touching a new mature Hermes core runtime file. It is a scoped allow
+policy for owner workspace file actions, not a break-glass override.
+
 Upstream base:
 
 ```text
