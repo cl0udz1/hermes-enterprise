@@ -148,6 +148,7 @@ import yaml
 
 from hermes_cli.colors import Colors, color
 from hermes_cli.default_soul import DEFAULT_SOUL_MD
+from enterprise.config import DEFAULT_ENTERPRISE_CONFIG
 
 
 # =============================================================================
@@ -1498,6 +1499,11 @@ DEFAULT_CONFIG = {
         # systems where any runtime install is unacceptable.
         "allow_lazy_installs": True,
     },
+
+    # Enterprise security distribution controls. Disabled by default so normal
+    # Hermes behavior remains upstream-compatible until the fork explicitly
+    # enables enforcement.
+    "enterprise": copy.deepcopy(DEFAULT_ENTERPRISE_CONFIG),
 
     "cron": {
         # Wrap delivered cron responses with a header (task name) and footer
@@ -3257,7 +3263,7 @@ _KNOWN_ROOT_KEYS = {
     "fallback_providers", "credential_pool_strategies", "toolsets",
     "agent", "terminal", "display", "compression", "delegation",
     "auxiliary", "custom_providers", "context", "memory", "gateway",
-    "sessions",
+    "sessions", "enterprise",
 }
 
 # Valid fields inside a custom_providers list entry

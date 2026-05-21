@@ -8,9 +8,19 @@ tests prove it.
 
 ## Current Status
 
-No enterprise runtime enforcement has been implemented yet.
+Enterprise package skeleton work has started, but no enterprise runtime
+enforcement has been implemented yet.
 
-Existing files are planning and design artifacts only.
+Implemented so far:
+
+1. Enterprise default config, disabled by default.
+2. Enterprise mode resolver.
+3. Runtime contract dataclasses with deterministic JSON/hashing.
+4. Local SQLite audit store skeleton for structured events.
+5. Enterprise tests for contracts, config defaults, import no-op behavior, and
+   audit store append/list behavior.
+
+No Hermes authority seam has been patched yet.
 
 ## Current Hermes Authority Surfaces
 
@@ -27,6 +37,13 @@ surfaces:
 | Gateway | Hermes exposes messaging/platform authority. | Add identity binding and assignment policy. |
 | Cron | Hermes can run scheduled work. | Add owner, intent, expiry, and policy wrapper. |
 | Artifacts | Planned enterprise evidence and data objects. | Add vault and hydration boundary. |
+
+## Current Hermes Files Touched
+
+| File | Reason | Runtime authority impact |
+|---|---|---|
+| `pyproject.toml` | Include the new `enterprise` package in setuptools discovery. | None. |
+| `hermes_cli/config.py` | Add disabled-by-default enterprise config defaults and root-key validation. | None; enterprise mode remains off. |
 
 ## Controls Not Yet Implemented
 

@@ -59,17 +59,35 @@ The following planning files exist before runtime implementation:
 
 ## Baseline Test Evidence
 
-Baseline tests have not been run yet in this record.
+Targeted MVP-0 skeleton verification:
 
-Before the first runtime patch, record:
+```text
+python -m pytest -o addopts="" --basetemp .pytest-tmp tests\enterprise
+```
 
-1. Python executable and version.
-2. Virtual environment used: `.venv`, `venv`, shared Hermes venv, or system
-   Python.
-3. Test command used.
-4. Existing failures before enterprise code changes.
-5. Current platform: Windows, WSL, Linux, macOS, or container.
-6. Whether the failure is environment-related or repository-related.
+Result:
+
+```text
+9 passed
+```
+
+Environment notes:
+
+1. Platform: Windows.
+2. Python: system `python`, observed as Python 3.14.4 during pytest output.
+3. No `.venv`, `venv`, or shared Hermes venv was present in this checkout.
+4. The repo's default pytest addopts require plugins that were not installed in
+   the system Python environment, so the targeted run disabled addopts.
+5. The default pytest temp root under AppData was inaccessible on this machine,
+   so the targeted run used workspace-local `--basetemp .pytest-tmp`.
+
+Before the first runtime authority patch, also record:
+
+1. Python executable path.
+2. Full targeted tests around the touched Hermes authority seam.
+3. Enterprise-off smoke result for that authority seam.
+4. Existing failures before the runtime patch, if any.
+5. Whether the failure is environment-related or repository-related.
 
 ## Enterprise-Off Compatibility Contract
 
@@ -97,6 +115,7 @@ When enterprise mode is disabled:
 
 Risk is low at this stage because only planning documents are being added.
 
-The first meaningful compatibility risk appears when a core adapter hook is
-added around tool execution, provider egress, memory, plugin admission, gateway
-identity, or cron authority.
+The current compatibility risk is limited to package discovery and config
+default loading. The first meaningful runtime compatibility risk appears when a
+core adapter hook is added around tool execution, provider egress, memory,
+plugin admission, gateway identity, or cron authority.
