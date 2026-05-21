@@ -20,6 +20,8 @@ import os
 import random
 import threading
 import time
+from collections.abc import Mapping
+from types import SimpleNamespace
 from typing import Any, Optional
 
 from agent.display import (
@@ -60,6 +62,51 @@ def _ra():
     """Lazy reference to ``run_agent`` so patches like ``run_agent._set_interrupt`` work."""
     import run_agent
     return run_agent
+
+
+def _enterprise_pre_tool_decision(agent, function_name: str, function_args: dict, effective_task_id: str, tool_call_id: str):
+    """Return an enterprise firewall decision, or None when unavailable."""
+    try:
+        from enterprise.firewall.action import evaluate_tool_call
+
+        return evaluate_tool_call(
+            function_name,
+            function_args,
+            agent=agent,
+            task_id=effective_task_id or "",
+            tool_call_id=tool_call_id or "",
+        )
+    except Exception as exc:
+        logger.error("Enterprise action firewall failed for %s: %s", function_name, exc, exc_info=True)
+        enabled = False
+        try:
+            from enterprise.mode import EnterpriseMode
+
+            root_config = None
+            for attr in ("enterprise_root_config", "_enterprise_root_config", "root_config", "_root_config", "config", "_config"):
+                value = getattr(agent, attr, None)
+                if isinstance(value, Mapping):
+                    root_config = value
+                    break
+            enabled = EnterpriseMode.from_config(root_config).enabled
+        except Exception:
+            enabled = False
+
+        if enabled:
+            return SimpleNamespace(
+                allows_execution=False,
+                tool_result=json.dumps(
+                    {
+                        "error": "Enterprise action firewall failed closed before tool execution.",
+                        "enterprise": {
+                            "tool_name": function_name,
+                            "reason": str(exc),
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+        return None
 
 
 def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effective_task_id: str, api_call_count: int = 0) -> None:
@@ -139,6 +186,16 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
             if not guardrail_decision.allows_execution:
                 block_result = agent._guardrail_block_result(guardrail_decision)
                 blocked_by_guardrail = True
+            else:
+                enterprise_decision = _enterprise_pre_tool_decision(
+                    agent,
+                    function_name,
+                    function_args,
+                    effective_task_id,
+                    tool_call.id,
+                )
+                if enterprise_decision is not None and not enterprise_decision.allows_execution:
+                    block_result = enterprise_decision.tool_result
 
         parsed_calls.append((tool_call, function_name, function_args, block_result, blocked_by_guardrail))
 
@@ -512,7 +569,23 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
             if not guardrail_decision.allows_execution:
                 _guardrail_block_decision = guardrail_decision
 
-        _execution_blocked = _block_msg is not None or _guardrail_block_decision is not None
+        _enterprise_block_result: str | None = None
+        if _block_msg is None and _guardrail_block_decision is None:
+            enterprise_decision = _enterprise_pre_tool_decision(
+                agent,
+                function_name,
+                function_args,
+                effective_task_id,
+                tool_call.id,
+            )
+            if enterprise_decision is not None and not enterprise_decision.allows_execution:
+                _enterprise_block_result = enterprise_decision.tool_result
+
+        _execution_blocked = (
+            _block_msg is not None
+            or _guardrail_block_decision is not None
+            or _enterprise_block_result is not None
+        )
 
         if _execution_blocked:
             # Tool blocked by plugin or guardrail policy — skip counters,
@@ -594,6 +667,10 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
             # Tool blocked by tool-loop guardrail — synthesize exactly one
             # tool result for the original tool_call_id without executing.
             function_result = agent._guardrail_block_result(_guardrail_block_decision)
+            tool_duration = 0.0
+        elif _enterprise_block_result is not None:
+            # Tool blocked by enterprise action firewall before side effects.
+            function_result = _enterprise_block_result
             tool_duration = 0.0
         elif function_name == "todo":
             from tools.todo_tool import todo_tool as _todo_tool

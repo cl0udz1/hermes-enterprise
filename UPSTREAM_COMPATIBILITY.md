@@ -96,6 +96,39 @@ Result:
 25 passed
 ```
 
+Action firewall runtime slice verification:
+
+```text
+python -m pytest -o addopts="" --basetemp .pytest-tmp tests\enterprise\test_action_firewall.py tests\run_agent\test_tool_call_guardrail_runtime.py
+```
+
+Result:
+
+```text
+14 passed
+```
+
+Full enterprise package verification after the action firewall slice:
+
+```text
+python -m pytest -o addopts="" --basetemp .pytest-tmp tests\enterprise
+```
+
+Result:
+
+```text
+31 passed
+```
+
+Additional environment note:
+
+```text
+The first collection attempt failed because the system Python environment did
+not have requests installed. Installed the repo-pinned dependency
+requests==2.33.0 into the user Python environment, then reran the focused tests
+successfully.
+```
+
 Before the first runtime authority patch, also record:
 
 1. Python executable path.
@@ -128,9 +161,14 @@ When enterprise mode is disabled:
 
 ## Current Compatibility Risk
 
-Risk is low at this stage because only planning documents are being added.
+Risk is moderate now because the first Hermes runtime authority seam has been
+patched.
 
-The current compatibility risk is limited to package discovery and config
-default loading. The first meaningful runtime compatibility risk appears when a
-core adapter hook is added around tool execution, provider egress, memory,
-plugin admission, gateway identity, or cron authority.
+The current runtime patch is intentionally small: it adds one lazy enterprise
+preflight check in sequential tool execution and one in concurrent tool
+execution. Enterprise mode remains disabled by default, and focused tests cover
+enterprise-off behavior plus existing tool-loop guardrail behavior.
+
+The next meaningful compatibility risks appear when adding result sanitization,
+provider egress policy, memory gates, plugin admission, gateway identity, or cron
+authority.
