@@ -41,6 +41,9 @@ authority or change normal Hermes execution behavior.
 MVP-0 Release-Gate Regression Suite adds tests and shared fake fixtures only.
 It does not patch mature Hermes runtime files.
 
+MVP-0 Closure Gate adds a local gate runner, downstream GitHub Actions workflow,
+and readiness note only. It does not patch mature Hermes runtime files.
+
 Upstream base:
 
 ```text

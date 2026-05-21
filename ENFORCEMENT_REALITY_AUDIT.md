@@ -63,6 +63,12 @@ Implemented so far:
     fixtures.
 32. Regression coverage for blocked execution, approval action-hash binding,
     covered secret non-leakage, and enterprise-off smoke behavior.
+33. Cross-platform MVP-0 gate runner for enterprise compile checks, full
+    enterprise tests, and targeted Hermes authority-seam regressions.
+34. Downstream GitHub Actions workflow that runs the MVP-0 gate on PRs and
+    pushes targeting `enterprise/main`.
+35. MVP-0 readiness note that lists allowed claims, forbidden claims, release
+    evidence, and the correct MVP-1 starting point.
 
 Hermes authority seams patched so far:
 
@@ -104,6 +110,9 @@ surfaces:
 | `hermes_cli/doctor.py` | Render an Enterprise Security section from the enterprise doctor report. | Diagnostic only; no runtime enforcement change. |
 | `tests/enterprise/conftest.py` | Provide shared fake provider, memory, secret, agent, and tool-output fixtures. | Test-only; no runtime authority. |
 | `tests/enterprise/test_mvp0_release_gates.py` | Encode MVP-0 release-blocking regression gates. | Test-only; no runtime authority. |
+| `scripts/enterprise_mvp0_gate.py` | Run the repeatable MVP-0 release gate locally and in CI. | Test/CI only; no runtime authority. |
+| `.github/workflows/enterprise-mvp0-gate.yml` | Run the MVP-0 release gate for `enterprise/main`. | CI only; no runtime authority. |
+| `ENTERPRISE_MVP0_READINESS.md` | State MVP-0 claim boundaries and release evidence. | Documentation only. |
 
 ## Controls Not Yet Implemented
 
@@ -153,6 +162,8 @@ MVP-0 may claim only what is implemented and tested:
     missing critical controls before team rollout.
 13. MVP-0 has release-gate regression tests for blocked execution, changed
     action arguments, fake secret handling, and enterprise-off compatibility.
+14. MVP-0 has a repeatable local and CI gate command for enterprise release
+    checks on the downstream `enterprise/main` branch.
 
 ## Bypass Classes To Track
 
@@ -345,3 +356,20 @@ MVP-0 Release-Gate Regression Suite evidence:
 7. Verification:
    `python -m pytest -o addopts="" --basetemp .pytest-tmp tests\enterprise`
    returned 70 passed.
+
+MVP-0 Closure Gate evidence:
+
+1. Enforcement point: none; this slice adds release assurance and does not add
+   runtime authority.
+2. Local gate: `scripts/enterprise_mvp0_gate.py` runs enterprise package
+   compile checks, full `tests/enterprise`, and targeted Hermes seam
+   regressions for tool-loop guardrails, tool-result persistence, and doctor
+   diagnostics.
+3. CI gate: `.github/workflows/enterprise-mvp0-gate.yml` runs the same gate for
+   PRs and pushes targeting `enterprise/main` when enterprise code, patched
+   seams, test files, or enterprise docs change.
+4. Claim boundary: `ENTERPRISE_MVP0_READINESS.md` records allowed MVP-0 claims,
+   forbidden claims, release evidence, and the MVP-1 starting point.
+5. Verification:
+   `python scripts\enterprise_mvp0_gate.py` passed locally with 70 enterprise
+   tests and 15 targeted Hermes authority-seam tests.
