@@ -38,6 +38,9 @@ Enterprise Doctor v0 patches `hermes_cli/doctor.py` only to render a diagnostic
 section from the enterprise machine-readable report. It does not add runtime
 authority or change normal Hermes execution behavior.
 
+MVP-0 Release-Gate Regression Suite adds tests and shared fake fixtures only.
+It does not patch mature Hermes runtime files.
+
 Upstream base:
 
 ```text

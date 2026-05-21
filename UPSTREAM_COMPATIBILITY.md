@@ -264,6 +264,31 @@ Result:
 66 passed
 ```
 
+MVP-0 release-gate regression verification:
+
+```text
+python -m pytest -o addopts="" --basetemp .pytest-tmp tests\enterprise\test_mvp0_release_gates.py
+```
+
+Result:
+
+```text
+4 passed
+```
+
+Full enterprise package verification after the MVP-0 release-gate regression
+slice:
+
+```text
+python -m pytest -o addopts="" --basetemp .pytest-tmp tests\enterprise
+```
+
+Result:
+
+```text
+70 passed
+```
+
 Additional environment note:
 
 ```text
@@ -327,6 +352,8 @@ The current runtime patches are intentionally small:
    patch.
 8. One enterprise doctor diagnostic section in `hermes_cli/doctor.py`. This is
    a diagnostic CLI patch only and does not add runtime authority.
+9. The MVP-0 release-gate regression suite adds tests and fixtures only. It
+   does not add a new runtime patch.
 
 Enterprise mode remains disabled by default, and focused tests cover
 enterprise-off behavior plus existing tool-loop guardrail behavior.
@@ -335,4 +362,5 @@ The next meaningful compatibility risks appear when wiring hydration into
 provider or memory paths, adding approved staged execution, provider egress
 policy, memory gates, plugin admission, gateway identity, cron authority, or
 team/admin fast-path assignment management. The Enterprise Doctor v0 patch is
-lower runtime risk because it only reads diagnostic state and reports issues.
+lower runtime risk because it only reads diagnostic state and reports issues;
+the release-gate regression slice adds no runtime authority.

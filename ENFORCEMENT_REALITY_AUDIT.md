@@ -58,6 +58,11 @@ Implemented so far:
     sandbox profiles, result sanitizer, and streaming-policy readiness.
 30. Hermes doctor renders an Enterprise Security section and reports team,
     enterprise, or regulated missing critical controls as actionable issues.
+31. MVP-0 release-gate regression suite with shared fake enterprise secrets,
+    fake provider capture, fake memory sink, and fake untrusted tool output
+    fixtures.
+32. Regression coverage for blocked execution, approval action-hash binding,
+    covered secret non-leakage, and enterprise-off smoke behavior.
 
 Hermes authority seams patched so far:
 
@@ -97,6 +102,8 @@ surfaces:
 | `enterprise/fast_path.py` | Define owner-scoped developer fast-path eligibility for local workspace file actions. | No direct runtime authority until called by the action firewall. |
 | `enterprise/doctor.py` | Produce machine-readable enterprise health checks. | Diagnostic only; does not enforce runtime authority. |
 | `hermes_cli/doctor.py` | Render an Enterprise Security section from the enterprise doctor report. | Diagnostic only; no runtime enforcement change. |
+| `tests/enterprise/conftest.py` | Provide shared fake provider, memory, secret, agent, and tool-output fixtures. | Test-only; no runtime authority. |
+| `tests/enterprise/test_mvp0_release_gates.py` | Encode MVP-0 release-blocking regression gates. | Test-only; no runtime authority. |
 
 ## Controls Not Yet Implemented
 
@@ -144,6 +151,8 @@ MVP-0 may claim only what is implemented and tested:
     developer fast path is configured, audited, sandbox-only, and no-egress.
 12. Enterprise Doctor can report implemented enterprise controls and flag
     missing critical controls before team rollout.
+13. MVP-0 has release-gate regression tests for blocked execution, changed
+    action arguments, fake secret handling, and enterprise-off compatibility.
 
 ## Bypass Classes To Track
 
@@ -310,3 +319,29 @@ Enterprise Doctor v0 evidence:
 7. Explicit limitation: Doctor does not replace enforcement, SIEM export,
    tamper-evident storage, provider egress policy, or admin dashboard health
    management.
+
+MVP-0 Release-Gate Regression Suite evidence:
+
+1. Enforcement point: none; this slice adds regression evidence for existing
+   MVP-0 controls and does not add runtime authority.
+2. Shared fixtures: `tests/enterprise/conftest.py` provides fake provider
+   capture, fake memory sink, fake OpenAI-style secret, fake untrusted tool
+   output, mock tool calls, and lightweight agent construction.
+3. Blocked execution gate:
+   `tests/enterprise/test_mvp0_release_gates.py::test_release_gate_blocked_tool_action_does_not_execute`
+   proves a blocked pre-tool decision never reaches `handle_function_call`.
+4. Approval binding gate:
+   `tests/enterprise/test_mvp0_release_gates.py::test_release_gate_changed_action_args_invalidate_staged_approval`
+   proves changed args produce a different action hash, stage id, and
+   idempotency key.
+5. Secret non-leakage gate:
+   `tests/enterprise/test_mvp0_release_gates.py::test_release_gate_fake_secret_absent_from_provider_audit_session_and_memory`
+   checks the fake secret is absent from provider payloads, audit events,
+   session history, and memory session-end payloads on covered sanitized paths.
+6. Enterprise-off gate:
+   `tests/enterprise/test_mvp0_release_gates.py::test_release_gate_enterprise_off_smoke_preserves_normal_tool_path`
+   proves disabled enterprise mode does not audit, stage, block, or sanitize
+   the normal tool path.
+7. Verification:
+   `python -m pytest -o addopts="" --basetemp .pytest-tmp tests\enterprise`
+   returned 70 passed.
