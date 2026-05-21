@@ -26,7 +26,7 @@ https://github.com/NousResearch/hermes-agent
 Current upstream base used for initial planning:
 
 ```text
-43c7a1b2621bdf7bf024f296c5d00e990c85e9de
+ca192cfb773915c9d8113352b8646d3ce9329424
 ```
 
 ## License
