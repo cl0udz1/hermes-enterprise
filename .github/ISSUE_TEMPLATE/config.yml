@@ -1,5 +1,8 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Security reports
+    url: https://github.com/cl0udz1/hermes-enterprise/security/advisories/new
+    about: Report sensitive security issues privately.
   - name: 💬 Nous Research Discord
     url: https://discord.gg/NousResearch
     about: For quick questions, showcasing projects, sharing skills, and community chat.
