@@ -334,6 +334,41 @@ enterprise compile check passed
 Enterprise MVP-0 gate passed.
 ```
 
+Current branch verification after the MVP-1 Plugin/MCP admission slice:
+
+```text
+python scripts\enterprise_mvp0_gate.py
+```
+
+Result:
+
+```text
+enterprise compile check passed
+86 enterprise tests passed
+15 targeted Hermes authority-seam tests passed
+Enterprise MVP-0 gate passed.
+```
+
+Additional Plugin/MCP compatibility check after the same slice:
+
+```text
+python -m pytest -p no:cacheprovider -o addopts= --basetemp .pytest-tmp-plugin-mcp-compat tests\hermes_cli\test_plugins.py tests\hermes_cli\test_startup_plugin_gating.py tests\tools\test_mcp_dynamic_discovery.py tests\tools\test_mcp_utility_capability_gating.py
+```
+
+Result:
+
+```text
+126 passed, 1 skipped
+```
+
+Note:
+
+```text
+tests\tools\test_mcp_tool.py was not included in the compatibility rerun
+because this local Python/MCP SDK environment cannot import
+CreateMessageResultWithTools from tools.mcp_tool during collection.
+```
+
 Additional environment note:
 
 ```text

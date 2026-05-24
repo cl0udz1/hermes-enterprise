@@ -38,6 +38,7 @@ class AuditEventType(str, Enum):
     RESULT_SANITIZED = "result_sanitized"
     PROVIDER_EGRESS_SANITIZED = "provider_egress_sanitized"
     MEMORY_GOVERNANCE_SANITIZED = "memory_governance_sanitized"
+    AUTHORITY_ADMISSION_DECISION = "authority_admission_decision"
     SANDBOX_VIOLATION = "sandbox_violation"
     HYDRATION_DECISION = "hydration_decision"
     AUDIT_ERROR = "audit_error"
@@ -211,6 +212,18 @@ class MemoryGovernanceDecision(JsonContract):
     raw_sha256: str
     sanitized_sha256: str
     action: str = "redact"
+    audit_event_ids: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class AuthorityAdmissionDecision(JsonContract):
+    decision_id: str
+    surface: str
+    resource: str
+    outcome: DecisionOutcome
+    reason: str
+    trust_source: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
     audit_event_ids: list[str] = field(default_factory=list)
 
 

@@ -69,12 +69,23 @@ Implemented so far:
     pushes targeting `enterprise/main`.
 35. MVP-0 readiness note that lists allowed claims, forbidden claims, release
     evidence, and the correct MVP-1 starting point.
+36. Chat Completions provider egress guard for outbound request payloads.
+37. Memory Manager governance guard for governed memory read/write payloads.
+38. Plugin and MCP admission contracts for plugin manifests, plugin tools, MCP
+    servers, and MCP tools.
+39. Plugin import and plugin tool-registration admission gates.
+40. MCP server startup and MCP tool-registration admission gates.
+41. Doctor check for strict Plugin/MCP admission probes.
 
 Hermes authority seams patched so far:
 
 1. `agent/tool_executor.py` preflight for sequential tool execution.
 2. `agent/tool_executor.py` preflight for concurrent tool execution.
 3. `agent/tool_dispatch_helpers.py` tool-result message construction.
+4. `agent/transports/chat_completions.py` Chat Completions payload assembly.
+5. `agent/memory_manager.py` memory provider orchestration.
+6. `hermes_cli/plugins.py` plugin import and plugin tool registration.
+7. `tools/mcp_tool.py` MCP server startup and tool registration.
 
 ## Current Hermes Authority Surfaces
 
@@ -87,7 +98,8 @@ surfaces:
 | Tool results | Hermes feeds tool outputs back into model context. | Add result sanitizer and context labeling. |
 | Provider egress | Chat Completions provider payloads pass through the enterprise provider-egress guard when enterprise mode is enabled. | Extend coverage to remaining provider transports, auxiliary calls, embeddings, direct client factories, and streamed provider responses. |
 | Memory | Memory Manager payloads pass through the enterprise memory-governance guard when enterprise mode is enabled. | Extend to tenant-scoped memory isolation, provider-specific recall ACLs, semantic classification, and durable quarantine workflow. |
-| Plugins | Hermes can load third-party tools/hooks. | Add manifest and trust admission. |
+| Plugins | Enterprise mode checks plugin admission before enabled plugins import and before plugin tools register. | Extend to memory/model-provider plugin discovery, signature/provenance verification, and plugin runtime sandboxing. |
+| MCP | Enterprise mode checks MCP server admission before startup and MCP tool admission before registration. | Add dynamic revocation for already-running servers, richer remote-server provenance, and per-tool risk manifests. |
 | Gateway | Hermes exposes messaging/platform authority. | Add identity binding and assignment policy. |
 | Cron | Hermes can run scheduled work. | Add owner, intent, expiry, and policy wrapper. |
 | Artifacts | Enterprise artifact vault and hydration boundary exist as v0 modules. | Wire provider, memory, support bundle, and workflow paths through hydration in later slices. |
@@ -103,8 +115,11 @@ surfaces:
 | `agent/tool_dispatch_helpers.py` | Route tool-result message construction through the enterprise result sanitizer. | Sanitizes covered tool output before model-visible context when enterprise mode is enabled. |
 | `agent/transports/chat_completions.py` | Route OpenAI-compatible provider request payloads through the enterprise provider-egress guard. | Sanitizes Chat Completions provider payloads before provider submission when enterprise mode is enabled. |
 | `agent/memory_manager.py` | Route memory write/read payloads through the enterprise memory-governance guard. | Sanitizes governed memory provider inputs and recalled memory outputs when enterprise mode is enabled. |
+| `hermes_cli/plugins.py` | Route enabled plugin imports and plugin tool registrations through enterprise admission checks. | Quarantines unapproved plugins and unmanifested plugin-provided tools before they become active authority in enterprise mode. |
+| `tools/mcp_tool.py` | Route MCP server startup and discovered tool registration through enterprise admission checks. | Quarantines unapproved MCP servers before connection and undeclared MCP tools before registry exposure in enterprise mode. |
 | `enterprise/provider_egress.py` | Define deterministic provider request egress governance and audit emission. | Enforces the Chat Completions provider payload boundary when called by the transport. |
 | `enterprise/memory_governance.py` | Define deterministic memory payload governance and audit emission. | Enforces memory payload boundaries when called by Memory Manager. |
+| `enterprise/admission.py` | Define deterministic plugin and MCP admission decisions and audit emission. | Enforces plugin/MCP admission when called by plugin and MCP runtime seams. |
 | `enterprise/sanitization.py` | Share deterministic secret and prompt-control sanitizers across result and provider boundaries. | No direct authority until called by a runtime boundary. |
 | `enterprise/firewall/action.py` | Feed observed sandbox side effects into triage, apply developer local fast path, and emit sandbox/staging audit events. | Enforces manifest/profile mismatch checks and audited local fast-path decisions inside the existing action firewall path. |
 | `enterprise/sandbox/*` | Define sandbox profiles and v0 observed-intent enforcement. | No direct runtime authority until called by the action firewall. |
@@ -131,18 +146,22 @@ These are not real yet:
    provider responses.
 4. Secret broker.
 5. Access Broker.
-6. Provider/runtime integration with the Artifact Vault and Context Hydration
+6. Plugin admission for memory-provider/model-provider discovery systems,
+   plugin code-signature verification, and plugin runtime sandboxing.
+7. Dynamic revocation of already-running MCP servers when enterprise policy is
+   tightened during a live process.
+8. Provider/runtime integration with the Artifact Vault and Context Hydration
    Boundary, plus deeper memory integration with artifact-backed quarantine.
-7. Durable encrypted artifact storage and tenant-scoped artifact isolation.
-8. Managed agent fleet controller.
-9. Agent Builder.
-10. SIEM export.
-11. Tamper-evident audit storage.
-12. Tenant/workspace isolation.
-13. Full semantic DLP/prompt-injection classification beyond deterministic
+9. Durable encrypted artifact storage and tenant-scoped artifact isolation.
+10. Managed agent fleet controller.
+11. Agent Builder.
+12. SIEM export.
+13. Tamper-evident audit storage.
+14. Tenant/workspace isolation.
+15. Full semantic DLP/prompt-injection classification beyond deterministic
     sanitizer patterns.
-14. OS/container-level syscall, filesystem, and network sandbox enforcement.
-15. Fully implemented provider streaming scanner; Enterprise Doctor reports it
+16. OS/container-level syscall, filesystem, and network sandbox enforcement.
+17. Fully implemented provider streaming scanner; Enterprise Doctor reports it
     as warning in Developer Secure mode and failure in team/enterprise modes.
 
 ## First Enforcement Claims Allowed After MVP-0
@@ -326,8 +345,8 @@ Enterprise Doctor v0 evidence:
    renders the Enterprise Security section in `hermes doctor`.
 4. Critical checks: enterprise mode config, audit store, action firewall hook,
    capability manifest loading, triage latency config, sandbox profile coverage,
-   result sanitizer, provider egress guard, memory governance, and streaming
-   policy readiness.
+   result sanitizer, provider egress guard, memory governance, Plugin/MCP
+   admission, and streaming policy readiness.
 5. Fail-closed posture: missing critical controls fail in team, enterprise, or
    regulated mode; Developer Secure can warn for incomplete future controls.
 6. Tests:
@@ -443,3 +462,44 @@ MVP-1 Memory Governance v0 evidence:
    not yet provide tenant memory isolation, provider-specific recall ACLs,
    semantic classification, durable quarantine review, or memory deletion
    enforcement across third-party providers.
+
+MVP-1 Plugin/MCP Admission v0 evidence:
+
+1. Enforcement points:
+   `hermes_cli/plugins.py::PluginManager.discover_and_load(...)`,
+   `hermes_cli/plugins.py::PluginContext.register_tool(...)`,
+   `tools/mcp_tool.py::register_mcp_servers(...)`, and
+   `tools/mcp_tool.py::_register_server_tools(...)`.
+2. Enterprise module: `enterprise/admission.py` decides admission for plugin
+   manifests, plugin tools, MCP servers, and MCP tools, and emits
+   `authority_admission_decision` audit events for quarantines.
+3. Plugin import rule: bundled plugin sources are trusted by default; user,
+   project, and entrypoint plugins require explicit enterprise trust or
+   allow-list configuration before import in enterprise mode.
+4. Tool rule: plugin-provided tools and MCP-discovered tools must be declared
+   by manifest or trust metadata unless the enterprise admission config
+   explicitly disables that requirement.
+5. Enterprise-off gates:
+   `tests/enterprise/test_plugin_mcp_admission.py::test_admission_disabled_allows_untrusted_plugin_without_audit`
+   and
+   `tests/enterprise/test_plugin_mcp_admission.py::test_enterprise_off_plugin_tool_registration_is_unchanged`
+   prove disabled enterprise mode preserves ordinary plugin behavior.
+6. Enterprise-on gates:
+   `tests/enterprise/test_plugin_mcp_admission.py::test_untrusted_plugin_is_not_imported_in_enterprise_mode`,
+   `tests/enterprise/test_plugin_mcp_admission.py::test_plugin_tool_admission_requires_admitted_plugin`,
+   `tests/enterprise/test_plugin_mcp_admission.py::test_approved_plugin_can_only_register_declared_tools`,
+   `tests/enterprise/test_plugin_mcp_admission.py::test_untrusted_mcp_server_is_not_started_in_enterprise_mode`,
+   and
+   `tests/enterprise/test_plugin_mcp_admission.py::test_mcp_tool_registration_requires_declared_tool`
+   prove unapproved plugins/MCP servers and undeclared tools are quarantined
+   before registry exposure.
+7. Doctor evidence:
+   `tests/enterprise/test_enterprise_doctor.py` includes the
+   `plugin_mcp_admission` diagnostic check.
+8. Explicit limitation: this is an admission boundary, not plugin code
+   sandboxing, code-signature verification, runtime syscall/network sandboxing,
+   dynamic revocation of already-running MCP servers, or governance for the
+   separate memory/model-provider plugin discovery systems.
+9. Verification:
+   `python scripts\enterprise_mvp0_gate.py` passed locally with 86 enterprise
+   tests and 15 targeted Hermes authority-seam tests after this slice.
