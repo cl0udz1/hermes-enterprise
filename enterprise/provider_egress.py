@@ -20,7 +20,15 @@ from enterprise.mode import EnterpriseMode
 from enterprise.sanitization import sanitize_text_for_model_boundary
 
 
-DEFAULT_STREAMING_POSTURE = "request_payload_only"
+DEFAULT_STREAMING_POSTURE = "deny_sensitive_streaming"
+SENSITIVE_STREAMING_POSTURES = frozenset({"deny_sensitive_streaming"})
+COVERED_PROVIDER_EGRESS_ROUTES = (
+    "chat_completions",
+    "codex_responses",
+    "anthropic_messages",
+    "bedrock_converse",
+    "auxiliary",
+)
 
 
 def govern_provider_payload(
@@ -55,11 +63,15 @@ def govern_provider_payload(
                 raw_sha256="",
                 sanitized_sha256="",
                 streaming_posture=streaming_posture,
+                streaming_denied=False,
             ),
         )
 
     raw_sha256 = stable_hash(_json_safe(payload))
     sanitized, findings = _sanitize_payload(payload)
+    streaming_denied = _streaming_denied(payload, streaming_posture, findings)
+    if streaming_denied:
+        findings.append("streaming:denied_sensitive_payload")
     unique_findings = list(dict.fromkeys(findings))
     sanitized_sha256 = stable_hash(_json_safe(sanitized))
     changed = sanitized != payload
@@ -85,6 +97,7 @@ def govern_provider_payload(
                     findings=tuple(unique_findings),
                     redacted_preview=_redacted_preview(sanitized),
                     streaming_posture=streaming_posture,
+                    streaming_denied=streaming_denied,
                 )
             )
         except Exception:
@@ -100,9 +113,50 @@ def govern_provider_payload(
             raw_sha256=raw_sha256,
             sanitized_sha256=sanitized_sha256,
             streaming_posture=streaming_posture,
+            streaming_denied=streaming_denied,
             audit_event_ids=audit_event_ids,
         ),
     )
+
+
+def govern_provider_kwargs(
+    api_kwargs: Mapping[str, Any],
+    *,
+    route: str,
+    params: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Apply egress governance from transport kwargs parameter bags."""
+
+    params = params or {}
+    governed, _decision = govern_provider_payload(
+        api_kwargs,
+        root_config=params.get("enterprise_root_config"),
+        audit_store=params.get("enterprise_audit_store"),
+        route=route,
+    )
+    return governed
+
+
+def enforce_provider_streaming_policy(
+    api_kwargs: Mapping[str, Any],
+    *,
+    route: str,
+    root_config: Mapping[str, Any] | None = None,
+    audit_store: AuditStore | None = None,
+) -> tuple[dict[str, Any], ProviderEgressDecision]:
+    """Sanitize stream payloads and fail closed when sensitive streaming is denied."""
+
+    probe_payload = dict(api_kwargs)
+    probe_payload["stream"] = True
+    governed_probe, decision = govern_provider_payload(
+        probe_payload,
+        root_config=root_config,
+        audit_store=audit_store,
+        route=route,
+    )
+    governed = dict(governed_probe)
+    governed.pop("stream", None)
+    return governed, decision
 
 
 def _resolve_root_config(root_config: Mapping[str, Any] | None) -> Mapping[str, Any]:
@@ -162,6 +216,7 @@ def _append_provider_egress_event(
     findings: tuple[str, ...],
     redacted_preview: str,
     streaming_posture: str,
+    streaming_denied: bool = False,
 ) -> tuple[str, ...]:
     created_at = datetime.now(timezone.utc).isoformat()
     event_id = stable_hash(
@@ -188,10 +243,23 @@ def _append_provider_egress_event(
                 "findings": list(findings),
                 "sanitized_sha256": sanitized_sha256,
                 "streaming_posture": streaming_posture,
+                "streaming_denied": streaming_denied,
             },
         )
     )
     return (event_id,)
+
+
+def _streaming_denied(
+    payload: Mapping[str, Any],
+    streaming_posture: str,
+    findings: Iterable[str],
+) -> bool:
+    if str(streaming_posture) not in SENSITIVE_STREAMING_POSTURES:
+        return False
+    if payload.get("stream") is not True:
+        return False
+    return any(str(finding).startswith("secret_pattern:") for finding in findings)
 
 
 def _redacted_preview(content: Any, max_len: int = 240) -> str:

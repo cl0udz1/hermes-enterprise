@@ -62,7 +62,13 @@ class BedrockTransport(ProviderTransport):
         # Sentinel keys for dispatch — agent pops these before the boto3 call
         kwargs["__bedrock_converse__"] = True
         kwargs["__bedrock_region__"] = region
-        return kwargs
+        from enterprise.provider_egress import govern_provider_kwargs
+
+        return govern_provider_kwargs(
+            kwargs,
+            route="bedrock_converse",
+            params=params,
+        )
 
     def normalize_response(self, response: Any, **kwargs) -> NormalizedResponse:
         """Normalize Bedrock response to NormalizedResponse.

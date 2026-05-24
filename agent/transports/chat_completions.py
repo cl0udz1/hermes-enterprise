@@ -105,15 +105,13 @@ def _apply_enterprise_provider_egress(
 ) -> dict[str, Any]:
     """Apply downstream enterprise provider egress governance."""
 
-    from enterprise.provider_egress import govern_provider_payload
+    from enterprise.provider_egress import govern_provider_kwargs
 
-    governed_payload, _decision = govern_provider_payload(
+    return govern_provider_kwargs(
         api_kwargs,
-        root_config=params.get("enterprise_root_config"),
-        audit_store=params.get("enterprise_audit_store"),
         route="chat_completions",
+        params=params,
     )
-    return governed_payload
 
 
 class ChatCompletionsTransport(ProviderTransport):

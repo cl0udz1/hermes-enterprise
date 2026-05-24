@@ -205,7 +205,8 @@ class ProviderEgressDecision(JsonContract):
     findings: list[str]
     raw_sha256: str
     sanitized_sha256: str
-    streaming_posture: str = "request_payload_only"
+    streaming_posture: str = "deny_sensitive_streaming"
+    streaming_denied: bool = False
     audit_event_ids: list[str] = field(default_factory=list)
 
 

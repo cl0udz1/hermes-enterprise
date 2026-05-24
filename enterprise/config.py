@@ -56,8 +56,14 @@ DEFAULT_ENTERPRISE_CONFIG: dict[str, Any] = {
     },
     "provider_egress": {
         "enabled": True,
-        "route": "chat_completions",
-        "streaming_posture": "request_payload_only",
+        "streaming_posture": "deny_sensitive_streaming",
+        "covered_routes": [
+            "chat_completions",
+            "codex_responses",
+            "anthropic_messages",
+            "bedrock_converse",
+            "auxiliary",
+        ],
     },
     "memory_governance": {
         "enabled": True,

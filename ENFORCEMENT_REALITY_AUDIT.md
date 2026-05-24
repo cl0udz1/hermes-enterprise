@@ -69,13 +69,23 @@ Implemented so far:
     pushes targeting `enterprise/main`.
 35. MVP-0 readiness note that lists allowed claims, forbidden claims, release
     evidence, and the correct MVP-1 starting point.
-36. Chat Completions provider egress guard for outbound request payloads.
+36. Provider egress guard for Chat Completions, Codex Responses, Anthropic
+    Messages, Bedrock Converse, and auxiliary model-call request payloads.
 37. Memory Manager governance guard for governed memory read/write payloads.
 38. Plugin and MCP admission contracts for plugin manifests, plugin tools, MCP
     servers, and MCP tools.
 39. Plugin import and plugin tool-registration admission gates.
 40. MCP server startup and MCP tool-registration admission gates.
 41. Doctor check for strict Plugin/MCP admission probes.
+42. Gateway identity binding and assignment policy for mapped platform users,
+    channels, and subjects.
+43. Cron governance wrapper for owner, intent, expiry, and policy-context
+    metadata.
+44. Access Broker grant lifecycle for staged approvals, expiry, revocation,
+    approver identity, and exact action-hash binding.
+45. Fake Secret Broker for grant-gated, short-lived opaque credential issuance.
+46. Sensitive provider streaming denial for deterministic secret-bearing stream
+    payloads; this is not a streamed response scanner.
 
 Hermes authority seams patched so far:
 
@@ -86,6 +96,14 @@ Hermes authority seams patched so far:
 5. `agent/memory_manager.py` memory provider orchestration.
 6. `hermes_cli/plugins.py` plugin import and plugin tool registration.
 7. `tools/mcp_tool.py` MCP server startup and tool registration.
+8. `agent/transports/codex.py` Codex Responses payload assembly.
+9. `agent/transports/anthropic.py` Anthropic Messages payload assembly.
+10. `agent/transports/bedrock.py` Bedrock Converse payload assembly.
+11. `agent/auxiliary_client.py` auxiliary model-call payload assembly.
+12. `agent/chat_completion_helpers.py` Chat Completions streaming request
+    denial for sensitive payloads.
+13. `agent/codex_runtime.py` Codex Responses streaming request denial for
+    sensitive payloads.
 
 ## Current Hermes Authority Surfaces
 
@@ -96,7 +114,7 @@ surfaces:
 |---|---|---|
 | Tool execution | Hermes owns model-proposed tool execution. | Add action firewall at the strongest runtime seam. |
 | Tool results | Hermes feeds tool outputs back into model context. | Add result sanitizer and context labeling. |
-| Provider egress | Chat Completions provider payloads pass through the enterprise provider-egress guard when enterprise mode is enabled. | Extend coverage to remaining provider transports, auxiliary calls, embeddings, direct client factories, and streamed provider responses. |
+| Provider egress | Chat Completions, Codex Responses, Anthropic Messages, Bedrock Converse, and auxiliary model-call payloads pass through the enterprise provider-egress guard when enterprise mode is enabled. Sensitive stream payloads with deterministic secret findings are denied. | Extend coverage to embeddings, image-generation provider plugins, remaining direct client factories, and buffered streamed response scanning. |
 | Memory | Memory Manager payloads pass through the enterprise memory-governance guard when enterprise mode is enabled. | Extend to tenant-scoped memory isolation, provider-specific recall ACLs, semantic classification, and durable quarantine workflow. |
 | Plugins | Enterprise mode checks plugin admission before enabled plugins import and before plugin tools register. | Extend to memory/model-provider plugin discovery, signature/provenance verification, and plugin runtime sandboxing. |
 | MCP | Enterprise mode checks MCP server admission before startup and MCP tool admission before registration. | Add dynamic revocation for already-running servers, richer remote-server provenance, and per-tool risk manifests. |
@@ -114,10 +132,16 @@ surfaces:
 | `agent/tool_executor.py` | Add lazy enterprise preflight before sequential and concurrent tool execution. | Blocks covered tool calls before execution when enterprise mode is enabled. |
 | `agent/tool_dispatch_helpers.py` | Route tool-result message construction through the enterprise result sanitizer. | Sanitizes covered tool output before model-visible context when enterprise mode is enabled. |
 | `agent/transports/chat_completions.py` | Route OpenAI-compatible provider request payloads through the enterprise provider-egress guard. | Sanitizes Chat Completions provider payloads before provider submission when enterprise mode is enabled. |
+| `agent/transports/codex.py` | Route Codex Responses request payloads through the enterprise provider-egress guard. | Sanitizes Responses API payloads before provider submission when enterprise mode is enabled. |
+| `agent/transports/anthropic.py` | Route Anthropic Messages request payloads through the enterprise provider-egress guard. | Sanitizes Anthropic payloads before provider submission when enterprise mode is enabled. |
+| `agent/transports/bedrock.py` | Route Bedrock Converse request payloads through the enterprise provider-egress guard. | Sanitizes Bedrock Converse payloads before provider submission when enterprise mode is enabled. |
+| `agent/auxiliary_client.py` | Route auxiliary model-call kwargs through the enterprise provider-egress guard. | Sanitizes compression, vision, extraction, session-search, and other auxiliary LLM payloads when enterprise mode is enabled. |
+| `agent/chat_completion_helpers.py` | Check Chat Completions stream payloads against enterprise egress policy before provider streaming. | Denies deterministic secret-bearing streaming requests when enterprise mode is enabled and `deny_sensitive_streaming` is configured. |
+| `agent/codex_runtime.py` | Check Codex Responses stream payloads against enterprise egress policy before provider streaming. | Denies deterministic secret-bearing Responses streaming requests when enterprise mode is enabled and `deny_sensitive_streaming` is configured. |
 | `agent/memory_manager.py` | Route memory write/read payloads through the enterprise memory-governance guard. | Sanitizes governed memory provider inputs and recalled memory outputs when enterprise mode is enabled. |
 | `hermes_cli/plugins.py` | Route enabled plugin imports and plugin tool registrations through enterprise admission checks. | Quarantines unapproved plugins and unmanifested plugin-provided tools before they become active authority in enterprise mode. |
 | `tools/mcp_tool.py` | Route MCP server startup and discovered tool registration through enterprise admission checks. | Quarantines unapproved MCP servers before connection and undeclared MCP tools before registry exposure in enterprise mode. |
-| `enterprise/provider_egress.py` | Define deterministic provider request egress governance and audit emission. | Enforces the Chat Completions provider payload boundary when called by the transport. |
+| `enterprise/provider_egress.py` | Define deterministic provider request egress governance, route coverage, sensitive streaming denial, and audit emission. | Enforces covered provider payload boundaries when called by transports, auxiliary calls, or streaming request seams. |
 | `enterprise/memory_governance.py` | Define deterministic memory payload governance and audit emission. | Enforces memory payload boundaries when called by Memory Manager. |
 | `enterprise/admission.py` | Define deterministic plugin and MCP admission decisions and audit emission. | Enforces plugin/MCP admission when called by plugin and MCP runtime seams. |
 | `enterprise/sanitization.py` | Share deterministic secret and prompt-control sanitizers across result and provider boundaries. | No direct authority until called by a runtime boundary. |
@@ -141,11 +165,10 @@ These are not real yet:
 1. Approval queue, approval UI/API, and approved execution workflow for staged
    Action Firewall decisions.
 2. Agentic WAF.
-3. Provider egress coverage for Codex Responses, Anthropic Messages, Bedrock,
-   auxiliary calls, embeddings, direct client factories, and all streamed
-   provider responses.
-4. Secret broker.
-5. Access Broker.
+3. Provider egress coverage for embeddings, image-generation provider plugins,
+   remaining direct client factories, and all streamed provider responses.
+4. Real external secret broker integration with vault/KMS.
+5. Full approval execution UI/API on top of staged records and access grants.
 6. Plugin admission for memory-provider/model-provider discovery systems,
    plugin code-signature verification, and plugin runtime sandboxing.
 7. Dynamic revocation of already-running MCP servers when enterprise policy is
@@ -161,8 +184,9 @@ These are not real yet:
 15. Full semantic DLP/prompt-injection classification beyond deterministic
     sanitizer patterns.
 16. OS/container-level syscall, filesystem, and network sandbox enforcement.
-17. Fully implemented provider streaming scanner; Enterprise Doctor reports it
-    as warning in Developer Secure mode and failure in team/enterprise modes.
+17. Fully implemented provider streamed response scanner; current posture denies
+    deterministic secret-bearing streaming requests instead of buffering and
+    scanning response deltas.
 
 ## First Enforcement Claims Allowed After MVP-0
 
@@ -190,6 +214,15 @@ MVP-0 may claim only what is implemented and tested:
     action arguments, fake secret handling, and enterprise-off compatibility.
 14. MVP-0 has a repeatable local and CI gate command for enterprise release
     checks on the downstream `enterprise/main` branch.
+15. Covered provider request payloads for Chat Completions, Codex Responses,
+    Anthropic Messages, Bedrock Converse, and auxiliary model calls are
+    sanitized before provider submission in enterprise mode.
+16. Deterministic secret-bearing streaming provider requests are denied by
+    policy instead of claiming streamed response scanning.
+17. Access grants are scoped to staged action hashes and fail closed after
+    action changes, expiry, or revocation.
+18. Fake Secret Broker issues only opaque short-lived credential references
+    after a valid access grant; real vault/KMS integration is not claimed.
 
 ## Bypass Classes To Track
 
@@ -403,11 +436,14 @@ MVP-0 Closure Gate evidence:
 
 MVP-1 Provider Egress v0 evidence:
 
-1. Enforcement point: `agent/transports/chat_completions.py` after both
-   provider-profile and legacy Chat Completions payload assembly.
+1. Enforcement points: `agent/transports/chat_completions.py`,
+   `agent/transports/codex.py`, `agent/transports/anthropic.py`,
+   `agent/transports/bedrock.py`, `agent/auxiliary_client.py`,
+   `agent/chat_completion_helpers.py`, and `agent/codex_runtime.py`.
 2. Enterprise module: `enterprise/provider_egress.py` recursively sanitizes
-   outbound provider payload strings and emits `provider_egress_sanitized`
-   audit events only when the payload changes.
+   outbound provider payload strings, emits `provider_egress_sanitized`
+   audit events only when the payload changes, and marks deterministic
+   secret-bearing stream payloads as denied.
 3. Shared sanitizer: `enterprise/sanitization.py` keeps result and provider
    boundary redaction behavior aligned.
 4. Enterprise-off gate:
@@ -418,19 +454,23 @@ MVP-1 Provider Egress v0 evidence:
    preserves the Chat Completions transport payload.
 5. Enterprise-on gates:
    `tests/enterprise/test_provider_egress.py::test_chat_completions_provider_egress_redacts_before_fake_provider`
-   and
-   `tests/enterprise/test_provider_egress.py::test_chat_completions_profile_path_uses_provider_egress`
-   prove fake secrets are absent from Chat Completions provider payloads on
-   both transport branches.
+   `tests/enterprise/test_provider_egress.py::test_chat_completions_profile_path_uses_provider_egress`,
+   `tests/enterprise/test_provider_egress.py::test_codex_responses_transport_redacts_before_provider`,
+   `tests/enterprise/test_provider_egress.py::test_anthropic_messages_transport_redacts_before_provider`,
+   `tests/enterprise/test_provider_egress.py::test_bedrock_converse_transport_redacts_before_provider`,
+   `tests/enterprise/test_provider_egress.py::test_auxiliary_kwargs_are_governed_before_call`, and
+   `tests/enterprise/test_provider_egress.py::test_sensitive_streaming_payload_is_denied_by_policy`
+   prove fake secrets are absent from covered provider payloads and sensitive
+   stream payloads are denied by policy.
 6. Doctor evidence:
    `tests/enterprise/test_enterprise_doctor.py` now includes the
    `provider_egress` diagnostic check.
-7. Explicit limitation: streaming response scanning is not implemented. This
-   slice uses `request_payload_only` posture, meaning Chat Completions request
-   payloads are sanitized before streaming is enabled, but provider response
-   tokens are not buffered or scanned.
+7. Explicit limitation: streamed response scanning is not implemented. This
+   slice uses `deny_sensitive_streaming`: deterministic secret-bearing stream
+   requests are denied, but provider response tokens are not buffered or
+   scanned.
 8. Verification:
-   `python scripts\enterprise_mvp0_gate.py` passed locally with 74 enterprise
+   `python scripts\enterprise_mvp0_gate.py` passed locally with 108 enterprise
    tests and 15 targeted Hermes authority-seam tests after this slice.
 
 MVP-1 Memory Governance v0 evidence:

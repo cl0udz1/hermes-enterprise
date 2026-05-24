@@ -36,27 +36,31 @@ def test_enterprise_doctor_disabled_mode_is_machine_readable(tmp_path):
     }
 
 
-def test_enterprise_doctor_developer_secure_warns_for_missing_streaming_policy(tmp_path):
+def test_enterprise_doctor_developer_secure_warns_for_missing_gateway_assignment(tmp_path):
     report = run_enterprise_doctor(
         root_config={"enterprise": {"enabled": True, "edition": "developer_secure"}},
         hermes_home=tmp_path,
     )
 
     assert report.status is EnterpriseDoctorStatus.WARN
+    gateway = next(check for check in report.checks if check.name == "gateway_identity")
+    assert gateway.status is EnterpriseDoctorStatus.WARN
     streaming = next(check for check in report.checks if check.name == "streaming_policy")
-    assert streaming.status is EnterpriseDoctorStatus.WARN
-    assert "streaming scanner" in streaming.detail
+    assert streaming.status is EnterpriseDoctorStatus.PASS
+    assert "denies sensitive streaming" in streaming.detail
 
 
-def test_enterprise_doctor_team_fails_missing_streaming_policy(tmp_path):
+def test_enterprise_doctor_team_fails_missing_gateway_assignment(tmp_path):
     report = run_enterprise_doctor(
         root_config={"enterprise": {"enabled": True, "edition": "team"}},
         hermes_home=tmp_path,
     )
 
     assert report.status is EnterpriseDoctorStatus.FAIL
+    gateway = next(check for check in report.checks if check.name == "gateway_identity")
+    assert gateway.status is EnterpriseDoctorStatus.FAIL
     streaming = next(check for check in report.checks if check.name == "streaming_policy")
-    assert streaming.status is EnterpriseDoctorStatus.FAIL
+    assert streaming.status is EnterpriseDoctorStatus.PASS
 
 
 def test_enterprise_doctor_detects_manifest_loader_failure(monkeypatch, tmp_path):
