@@ -36,6 +36,9 @@ class AuditEventType(str, Enum):
     ACTION_STAGED = "action_staged"
     ACTION_EXECUTED = "action_executed"
     ACCESS_GRANT_REVOKED = "access_grant_revoked"
+    SECRET_ACCESS_REQUESTED = "secret_access_requested"
+    SECRET_ACCESS_DENIED = "secret_access_denied"
+    SECRET_CREDENTIAL_ISSUED = "secret_credential_issued"
     RESULT_SANITIZED = "result_sanitized"
     PROVIDER_EGRESS_SANITIZED = "provider_egress_sanitized"
     MEMORY_GOVERNANCE_SANITIZED = "memory_governance_sanitized"
@@ -308,6 +311,35 @@ class AccessGrant(JsonContract):
     stage_id: str = ""
     action_hash: str = ""
     tool_name: str = ""
+
+
+@dataclass(frozen=True)
+class SecretAccessRequest(JsonContract):
+    request_id: str
+    subject_id: str
+    secret_name: str
+    purpose: str
+    scope: list[str]
+    requested_at: str = ""
+    action_hash: str = ""
+    access_grant_id: str = ""
+    policy_version: str = "local"
+
+
+@dataclass(frozen=True)
+class IssuedCredential(JsonContract):
+    credential_id: str
+    request_id: str
+    subject_id: str
+    secret_name: str
+    broker_uri: str
+    scope: list[str]
+    expires_at: str
+    policy_version: str
+    issued_at: str = ""
+    approved_by: str = ""
+    access_grant_id: str = ""
+    secret_value_sha256: str = ""
 
 
 @dataclass(frozen=True)

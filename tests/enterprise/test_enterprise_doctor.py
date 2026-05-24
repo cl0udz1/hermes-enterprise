@@ -31,6 +31,7 @@ def test_enterprise_doctor_disabled_mode_is_machine_readable(tmp_path):
         "gateway_identity",
         "cron_governance",
         "access_broker",
+        "secret_broker",
         "streaming_policy",
     }
 
