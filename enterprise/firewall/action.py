@@ -300,7 +300,14 @@ def _root_config_from_agent(agent: Any) -> Mapping[str, Any] | None:
 def _subject_id(agent: Any) -> str:
     if agent is None:
         return "local-agent"
-    for attr in ("user_id", "subject_id", "session_id"):
+    for attr in (
+        "enterprise_subject_id",
+        "_enterprise_subject_id",
+        "subject_id",
+        "user_id",
+        "_user_id",
+        "session_id",
+    ):
         value = getattr(agent, attr, None)
         if value:
             return str(value)

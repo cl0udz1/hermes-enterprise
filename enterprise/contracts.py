@@ -39,6 +39,7 @@ class AuditEventType(str, Enum):
     PROVIDER_EGRESS_SANITIZED = "provider_egress_sanitized"
     MEMORY_GOVERNANCE_SANITIZED = "memory_governance_sanitized"
     AUTHORITY_ADMISSION_DECISION = "authority_admission_decision"
+    GATEWAY_IDENTITY_DECISION = "gateway_identity_decision"
     SANDBOX_VIOLATION = "sandbox_violation"
     HYDRATION_DECISION = "hydration_decision"
     AUDIT_ERROR = "audit_error"
@@ -224,6 +225,32 @@ class AuthorityAdmissionDecision(JsonContract):
     reason: str
     trust_source: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
+    audit_event_ids: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class GatewaySubjectBinding(JsonContract):
+    assignment_id: str
+    subject_id: str
+    platform: str
+    user_id_hash: str = ""
+    channel_hash: str = ""
+    thread_id_hash: str = ""
+    chat_type: str = ""
+
+
+@dataclass(frozen=True)
+class GatewayIdentityDecision(JsonContract):
+    decision_id: str
+    outcome: DecisionOutcome
+    reason: str
+    platform: str
+    subject_id: str = ""
+    assignment_id: str = ""
+    user_id_hash: str = ""
+    channel_hash: str = ""
+    thread_id_hash: str = ""
+    chat_type: str = ""
     audit_event_ids: list[str] = field(default_factory=list)
 
 

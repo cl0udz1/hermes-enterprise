@@ -6417,6 +6417,134 @@ class GatewayRunner:
 
         await adapter.send(source.chat_id, content, metadata=metadata)
 
+    def _evaluate_enterprise_gateway_identity(self, event: MessageEvent):
+        """Return the enterprise gateway identity decision for this event."""
+        source = getattr(event, "source", None)
+        if source is None:
+            return None
+        root_config = _load_gateway_config()
+        try:
+            from enterprise.gateway_identity import evaluate_gateway_identity
+
+            return evaluate_gateway_identity(source, root_config=root_config)
+        except Exception as exc:
+            try:
+                from enterprise.config import enterprise_config_from_root
+                from enterprise.contracts import DecisionOutcome, GatewayIdentityDecision, stable_hash
+                from enterprise.mode import EnterpriseMode
+
+                enterprise_cfg = enterprise_config_from_root(root_config)
+                gateway_cfg = enterprise_cfg.get("gateway_identity", {})
+                if not isinstance(gateway_cfg, dict):
+                    gateway_cfg = {}
+                mode = EnterpriseMode.from_config(root_config)
+                if not mode.is_enforcing or not bool(gateway_cfg.get("enabled", True)):
+                    logger.debug("enterprise gateway identity skipped after error: %s", exc)
+                    return None
+                platform = _gateway_platform_value(getattr(source, "platform", ""))
+                decision_id = stable_hash(
+                    {
+                        "surface": "gateway_identity",
+                        "platform": platform,
+                        "error": type(exc).__name__,
+                    }
+                )[:32]
+                logger.exception("enterprise gateway identity failed closed")
+                return GatewayIdentityDecision(
+                    decision_id=decision_id,
+                    outcome=DecisionOutcome.DENY,
+                    reason=f"gateway_identity_error:{type(exc).__name__}",
+                    platform=platform,
+                    subject_id="unmapped-gateway-subject",
+                    chat_type=str(getattr(source, "chat_type", "") or ""),
+                )
+            except Exception:
+                logger.exception("enterprise gateway identity failure could not be classified")
+                return None
+
+    @staticmethod
+    def _enterprise_gateway_identity_allows_dispatch(decision) -> bool:
+        if decision is None:
+            return True
+        return getattr(getattr(decision, "outcome", None), "value", None) == "allow"
+
+    @staticmethod
+    def _enterprise_gateway_identity_denied_reply(decision) -> str:
+        reason = getattr(decision, "reason", "") or "gateway identity policy"
+        decision_id = getattr(decision, "decision_id", "") or "unknown"
+        return (
+            "Enterprise policy blocked this gateway request because this "
+            f"user/channel is not assigned to an enterprise agent profile. "
+            f"Decision: `{decision_id}` ({reason})."
+        )
+
+    @staticmethod
+    def _bind_enterprise_gateway_identity(event: MessageEvent, decision) -> None:
+        try:
+            from enterprise.gateway_identity import bind_gateway_identity
+        except Exception:
+            return
+        bind_gateway_identity(event, decision)
+        bind_gateway_identity(getattr(event, "source", None), decision)
+
+    @staticmethod
+    def _copy_enterprise_gateway_identity(source, target) -> None:
+        if source is None or target is None:
+            return
+        for attr in (
+            "enterprise_subject_id",
+            "_enterprise_subject_id",
+            "enterprise_assignment_id",
+            "_enterprise_assignment_id",
+            "enterprise_gateway_identity_decision_id",
+            "_enterprise_gateway_identity_decision_id",
+            "enterprise_gateway_identity",
+        ):
+            if hasattr(source, attr):
+                try:
+                    setattr(target, attr, getattr(source, attr))
+                except Exception:
+                    pass
+
+    @staticmethod
+    def _apply_enterprise_gateway_identity_to_agent(agent, source, root_config=None) -> None:
+        if agent is None:
+            return
+        if isinstance(root_config, dict):
+            try:
+                agent.enterprise_root_config = root_config
+            except Exception:
+                pass
+        subject_id = str(
+            getattr(source, "enterprise_subject_id", None)
+            or getattr(source, "_enterprise_subject_id", None)
+            or ""
+        )
+        assignment_id = str(
+            getattr(source, "enterprise_assignment_id", None)
+            or getattr(source, "_enterprise_assignment_id", None)
+            or ""
+        )
+        decision_id = str(
+            getattr(source, "enterprise_gateway_identity_decision_id", None)
+            or getattr(source, "_enterprise_gateway_identity_decision_id", None)
+            or ""
+        )
+        identity = getattr(source, "enterprise_gateway_identity", None)
+        for attr, value in (
+            ("enterprise_subject_id", subject_id),
+            ("_enterprise_subject_id", subject_id),
+            ("enterprise_assignment_id", assignment_id),
+            ("_enterprise_assignment_id", assignment_id),
+            ("enterprise_gateway_identity_decision_id", decision_id),
+            ("_enterprise_gateway_identity_decision_id", decision_id),
+            ("enterprise_gateway_identity", identity if isinstance(identity, dict) else {}),
+        ):
+            try:
+                setattr(agent, attr, value)
+            except Exception:
+                pass
+
     async def _handle_message(self, event: MessageEvent) -> Optional[str]:
         """
         Handle an incoming message from any platform.
@@ -6523,6 +6651,19 @@ class GatewayRunner:
                     # Record rate limit so subsequent messages are silently ignored
                     self.pairing_store._record_rate_limit(platform_name, source.user_id)
             return None
+
+        if not is_internal:
+            enterprise_identity = self._evaluate_enterprise_gateway_identity(event)
+            if enterprise_identity is not None:
+                if not self._enterprise_gateway_identity_allows_dispatch(enterprise_identity):
+                    logger.warning(
+                        "Enterprise gateway identity denied dispatch: platform=%s decision=%s reason=%s",
+                        source.platform.value if source.platform else "unknown",
+                        getattr(enterprise_identity, "decision_id", "unknown"),
+                        getattr(enterprise_identity, "reason", "unknown"),
+                    )
+                    return self._enterprise_gateway_identity_denied_reply(enterprise_identity)
+                self._bind_enterprise_gateway_identity(event, enterprise_identity)
         
         # Intercept messages that are responses to a pending /update prompt.
         # The update process (detached) wrote .update_prompt.json; the watcher
@@ -7794,7 +7935,9 @@ class GatewayRunner:
             cached_sources = OrderedDict()
             self._session_sources = cached_sources
         try:
-            cached_sources[session_key] = dataclasses.replace(source)
+            cached_source = dataclasses.replace(source)
+            self._copy_enterprise_gateway_identity(source, cached_source)
+            cached_sources[session_key] = cached_source
         except Exception:
             logger.debug("Failed to cache live session source for %s", session_key, exc_info=True)
             return
@@ -7842,7 +7985,9 @@ class GatewayRunner:
                 "telegram topic recovery: chat=%s user=%s %r -> %s",
                 source.chat_id, source.user_id, source.thread_id, recovered,
             )
+            previous_source = source
             source = dataclasses.replace(source, thread_id=recovered)
+            self._copy_enterprise_gateway_identity(previous_source, source)
             try:
                 event.source = source
             except Exception:
@@ -11444,6 +11589,7 @@ class GatewayRunner:
                     session_db=self._session_db,
                     fallback_model=self._fallback_model,
                 )
+                self._apply_enterprise_gateway_identity_to_agent(agent, source, user_config)
                 try:
                     return agent.run_conversation(
                         user_message=enriched_prompt,
@@ -16327,6 +16473,7 @@ class GatewayRunner:
             agent.reasoning_config = reasoning_config
             agent.service_tier = self._service_tier
             agent.request_overrides = turn_route.get("request_overrides") or {}
+            self._apply_enterprise_gateway_identity_to_agent(agent, source, user_config)
 
             _bg_review_release = threading.Event()
             _bg_review_pending: list[str] = []

@@ -89,6 +89,12 @@ DEFAULT_ENTERPRISE_CONFIG: dict[str, Any] = {
         "allow_mcp_tools_include_as_manifest": True,
         "audit_all_decisions": False,
     },
+    "gateway_identity": {
+        "enabled": True,
+        "unmapped_action": "deny",
+        "audit_all_decisions": True,
+        "assignments": {},
+    },
     "sandbox": {
         "enforce_manifests": True,
     },
