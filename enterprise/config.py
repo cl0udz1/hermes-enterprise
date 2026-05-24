@@ -77,6 +77,18 @@ DEFAULT_ENTERPRISE_CONFIG: dict[str, Any] = {
             "delegation",
         ],
     },
+    "plugin_mcp_admission": {
+        "enabled": True,
+        "trusted_plugin_sources": ["bundled"],
+        "allowed_plugins": [],
+        "plugin_trust": {},
+        "allowed_mcp_servers": [],
+        "mcp_server_trust": {},
+        "require_declared_plugin_tools": True,
+        "require_declared_mcp_tools": True,
+        "allow_mcp_tools_include_as_manifest": True,
+        "audit_all_decisions": False,
+    },
     "sandbox": {
         "enforce_manifests": True,
     },

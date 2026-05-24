@@ -334,6 +334,19 @@ class PluginContext:
         CDP-backed implementation). Without it, attempting to register a name
         already claimed by a different toolset is rejected.
         """
+        admission_error = self._manager._enterprise_plugin_tool_admission_error(
+            self.manifest,
+            name,
+        )
+        if admission_error:
+            logger.warning(
+                "Plugin '%s' tool '%s' skipped: %s",
+                self.manifest.name,
+                name,
+                admission_error,
+            )
+            return
+
         from tools.registry import registry
 
         registry.register(
@@ -783,6 +796,52 @@ class PluginManager:
         # Plugin skill registry: qualified name → metadata dict.
         self._plugin_skills: Dict[str, Dict[str, Any]] = {}
 
+    def _enterprise_plugin_admission_error(self, manifest: PluginManifest) -> str | None:
+        """Return an enterprise admission error, or None when loading is allowed."""
+        try:
+            from enterprise.admission import evaluate_plugin_manifest
+
+            decision = evaluate_plugin_manifest(manifest)
+        except Exception as exc:
+            try:
+                from enterprise.mode import EnterpriseMode
+
+                if EnterpriseMode.from_config().is_enforcing:
+                    return f"enterprise plugin admission failed closed: {exc}"
+            except Exception:
+                return None
+            return None
+
+        outcome = getattr(getattr(decision, "outcome", None), "value", decision.outcome)
+        if outcome == "allow":
+            return None
+        return f"enterprise plugin admission quarantined: {decision.reason}"
+
+    def _enterprise_plugin_tool_admission_error(
+        self,
+        manifest: PluginManifest,
+        tool_name: str,
+    ) -> str | None:
+        """Return an enterprise tool-admission error, or None when allowed."""
+        try:
+            from enterprise.admission import evaluate_plugin_tool
+
+            decision = evaluate_plugin_tool(manifest, tool_name)
+        except Exception as exc:
+            try:
+                from enterprise.mode import EnterpriseMode
+
+                if EnterpriseMode.from_config().is_enforcing:
+                    return f"enterprise plugin tool admission failed closed: {exc}"
+            except Exception:
+                return None
+            return None
+
+        outcome = getattr(getattr(decision, "outcome", None), "value", decision.outcome)
+        if outcome == "allow":
+            return None
+        return f"enterprise plugin tool admission quarantined: {decision.reason}"
+
     # -----------------------------------------------------------------------
     # Public
     # -----------------------------------------------------------------------
@@ -923,6 +982,15 @@ class PluginManager:
             # for the same reason: every platform Hermes ships must be
             # available out of the box without the user having to opt in.
             if manifest.source == "bundled" and manifest.kind in {"backend", "platform"}:
+                admission_error = self._enterprise_plugin_admission_error(manifest)
+                if admission_error:
+                    loaded = LoadedPlugin(manifest=manifest, enabled=False)
+                    loaded.error = admission_error
+                    self._plugins[lookup_key] = loaded
+                    logger.warning(
+                        "Skipping plugin '%s': %s", lookup_key, admission_error
+                    )
+                    continue
                 self._load_plugin(manifest)
                 continue
 
@@ -943,6 +1011,15 @@ class PluginManager:
                 self._plugins[lookup_key] = loaded
                 logger.debug(
                     "Skipping '%s' (not in plugins.enabled)", lookup_key
+                )
+                continue
+            admission_error = self._enterprise_plugin_admission_error(manifest)
+            if admission_error:
+                loaded = LoadedPlugin(manifest=manifest, enabled=False)
+                loaded.error = admission_error
+                self._plugins[lookup_key] = loaded
+                logger.warning(
+                    "Skipping plugin '%s': %s", lookup_key, admission_error
                 )
                 continue
             self._load_plugin(manifest)

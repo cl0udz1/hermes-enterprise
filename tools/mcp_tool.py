@@ -3047,6 +3047,61 @@ def _existing_tool_names() -> List[str]:
     return names
 
 
+def _enterprise_mcp_server_admission_error(name: str, config: dict) -> Optional[str]:
+    """Return an enterprise MCP-server admission error, or None when allowed."""
+    try:
+        from enterprise.admission import evaluate_mcp_server
+
+        decision = evaluate_mcp_server(name, config)
+    except Exception as exc:
+        try:
+            from enterprise.mode import EnterpriseMode
+
+            if EnterpriseMode.from_config().is_enforcing:
+                return f"enterprise MCP admission failed closed: {exc}"
+        except Exception:
+            return None
+        return None
+
+    outcome = getattr(getattr(decision, "outcome", None), "value", decision.outcome)
+    if outcome == "allow":
+        return None
+    return f"enterprise MCP admission quarantined: {decision.reason}"
+
+
+def _enterprise_mcp_tool_admission_error(
+    server_name: str,
+    tool_name: str,
+    config: dict,
+    *,
+    prefixed_tool_name: str = "",
+) -> Optional[str]:
+    """Return an enterprise MCP-tool admission error, or None when allowed."""
+    try:
+        from enterprise.admission import evaluate_mcp_tool
+
+        decision = evaluate_mcp_tool(
+            server_name,
+            tool_name,
+            config,
+            prefixed_tool_name=prefixed_tool_name,
+        )
+    except Exception as exc:
+        try:
+            from enterprise.mode import EnterpriseMode
+
+            if EnterpriseMode.from_config().is_enforcing:
+                return f"enterprise MCP tool admission failed closed: {exc}"
+        except Exception:
+            return None
+        return None
+
+    outcome = getattr(getattr(decision, "outcome", None), "value", decision.outcome)
+    if outcome == "allow":
+        return None
+    return f"enterprise MCP tool admission quarantined: {decision.reason}"
+
+
 def _register_server_tools(name: str, server: MCPServerTask, config: dict) -> List[str]:
     """Register tools from an already-connected server into the registry.
 
@@ -3091,6 +3146,21 @@ def _register_server_tools(name: str, server: MCPServerTask, config: dict) -> Li
 
         schema = _convert_mcp_schema(name, mcp_tool)
         tool_name_prefixed = schema["name"]
+        admission_error = _enterprise_mcp_tool_admission_error(
+            name,
+            mcp_tool.name,
+            config,
+            prefixed_tool_name=tool_name_prefixed,
+        )
+        if admission_error:
+            logger.warning(
+                "MCP server '%s': skipping tool '%s' (%s): %s",
+                name,
+                mcp_tool.name,
+                tool_name_prefixed,
+                admission_error,
+            )
+            continue
 
         # Guard against collisions with built-in (non-MCP) tools.
         existing_toolset = registry.get_toolset_for_tool(tool_name_prefixed)
@@ -3128,6 +3198,20 @@ def _register_server_tools(name: str, server: MCPServerTask, config: dict) -> Li
         handler_key = entry["handler_key"]
         handler = _handler_factories[handler_key](name, server.tool_timeout)
         util_name = schema["name"]
+        admission_error = _enterprise_mcp_tool_admission_error(
+            name,
+            handler_key,
+            config,
+            prefixed_tool_name=util_name,
+        )
+        if admission_error:
+            logger.warning(
+                "MCP server '%s': skipping utility tool '%s': %s",
+                name,
+                util_name,
+                admission_error,
+            )
+            continue
 
         # Same collision guard for utility tools.
         existing_toolset = registry.get_toolset_for_tool(util_name)
@@ -3206,20 +3290,32 @@ def register_mcp_servers(servers: Dict[str, dict]) -> List[str]:
         logger.debug("No explicit MCP servers provided")
         return []
 
-    # Only attempt servers that aren't already connected and are enabled
-    # (enabled: false skips the server entirely without removing its config)
+    # Only attempt servers that aren't already connected, are enabled, and pass
+    # enterprise admission (enabled: false skips the server entirely without
+    # removing its config).
     with _lock:
-        new_servers = {
+        candidate_servers = {
             k: v
             for k, v in servers.items()
             if k not in _servers and _parse_boolish(v.get("enabled", True), default=True)
         }
-        # Track which servers opt-in to parallel tool calls (idempotent).
-        for srv_name, srv_cfg in servers.items():
+
+    new_servers: Dict[str, dict] = {}
+    for srv_name, srv_cfg in candidate_servers.items():
+        admission_error = _enterprise_mcp_server_admission_error(srv_name, srv_cfg)
+        if admission_error:
+            logger.warning("Skipping MCP server '%s': %s", srv_name, admission_error)
+            continue
+        new_servers[srv_name] = srv_cfg
+
+    # Track which admitted servers opt-in to parallel tool calls (idempotent).
+    with _lock:
+        for srv_name, srv_cfg in new_servers.items():
+            safe_name = sanitize_mcp_name_component(srv_name)
             if _parse_boolish(srv_cfg.get("supports_parallel_tool_calls", False), default=False):
-                _parallel_safe_servers.add(sanitize_mcp_name_component(srv_name))
+                _parallel_safe_servers.add(safe_name)
             else:
-                _parallel_safe_servers.discard(sanitize_mcp_name_component(srv_name))
+                _parallel_safe_servers.discard(safe_name)
 
     if not new_servers:
         return _existing_tool_names()

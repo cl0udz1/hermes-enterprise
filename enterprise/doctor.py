@@ -75,6 +75,7 @@ def run_enterprise_doctor(
         _check_result_sanitizer(),
         _check_provider_egress(),
         _check_memory_governance(),
+        _check_plugin_mcp_admission(),
         _check_streaming_policy(mode, enterprise_cfg),
     ]
     return EnterpriseDoctorReport(
@@ -396,6 +397,124 @@ def _check_memory_governance() -> EnterpriseDoctorCheck:
             "Memory governance",
             str(exc),
             "Repair enterprise.memory_governance before enabling enterprise mode.",
+        )
+
+
+def _check_plugin_mcp_admission() -> EnterpriseDoctorCheck:
+    try:
+        from types import SimpleNamespace
+
+        from enterprise.admission import (
+            evaluate_mcp_server,
+            evaluate_mcp_tool,
+            evaluate_plugin_manifest,
+            evaluate_plugin_tool,
+        )
+        from enterprise.contracts import DecisionOutcome
+
+        class _ProbeAuditStore:
+            def append_event(self, _event):
+                return 1
+
+        root_config = {"enterprise": {"enabled": True}}
+        audit_store = _ProbeAuditStore()
+        untrusted_plugin = SimpleNamespace(
+            name="doctor-untrusted-plugin",
+            key="doctor-untrusted-plugin",
+            source="user",
+            provides_tools=[],
+        )
+        trusted_plugin = SimpleNamespace(
+            name="doctor-trusted-plugin",
+            key="doctor-trusted-plugin",
+            source="user",
+            provides_tools=["declared_tool"],
+        )
+        trusted_root = {
+            "enterprise": {
+                "enabled": True,
+                "plugin_mcp_admission": {
+                    "plugin_trust": {
+                        "doctor-trusted-plugin": {"approved": True},
+                    }
+                },
+            }
+        }
+
+        if evaluate_plugin_manifest(
+            untrusted_plugin,
+            root_config=root_config,
+            audit_store=audit_store,
+        ).outcome is not DecisionOutcome.QUARANTINE:
+            return _fail(
+                "plugin_mcp_admission",
+                "Plugin/MCP admission",
+                "untrusted plugin probe was not quarantined",
+                "Repair enterprise.admission plugin manifest checks.",
+            )
+        if evaluate_plugin_tool(
+            trusted_plugin,
+            "declared_tool",
+            root_config=trusted_root,
+            audit_store=audit_store,
+        ).outcome is not DecisionOutcome.ALLOW:
+            return _fail(
+                "plugin_mcp_admission",
+                "Plugin/MCP admission",
+                "declared trusted plugin tool was not allowed",
+                "Repair enterprise.admission plugin tool checks.",
+            )
+        if evaluate_mcp_server(
+            "doctor-untrusted-mcp",
+            {"command": "doctor-probe"},
+            root_config=root_config,
+            audit_store=audit_store,
+        ).outcome is not DecisionOutcome.QUARANTINE:
+            return _fail(
+                "plugin_mcp_admission",
+                "Plugin/MCP admission",
+                "untrusted MCP server probe was not quarantined",
+                "Repair enterprise.admission MCP server checks.",
+            )
+        trusted_mcp = {
+            "enterprise_trust": {
+                "approved": True,
+                "tools": ["safe_tool"],
+            }
+        }
+        if evaluate_mcp_tool(
+            "doctor-trusted-mcp",
+            "safe_tool",
+            trusted_mcp,
+            root_config=root_config,
+            audit_store=audit_store,
+        ).outcome is not DecisionOutcome.ALLOW:
+            return _fail(
+                "plugin_mcp_admission",
+                "Plugin/MCP admission",
+                "declared MCP tool probe was not allowed",
+                "Repair enterprise.admission MCP tool checks.",
+            )
+        if evaluate_mcp_tool(
+            "doctor-trusted-mcp",
+            "rogue_tool",
+            trusted_mcp,
+            root_config=root_config,
+            audit_store=audit_store,
+        ).outcome is not DecisionOutcome.QUARANTINE:
+            return _fail(
+                "plugin_mcp_admission",
+                "Plugin/MCP admission",
+                "undeclared MCP tool probe was not quarantined",
+                "Repair enterprise.admission MCP tool checks.",
+            )
+        return _pass("plugin_mcp_admission", "Plugin/MCP admission", "strict admission probes passed")
+    except Exception as exc:
+        return _fail(
+            "plugin_mcp_admission",
+            "Plugin/MCP admission",
+            str(exc),
+            "Repair enterprise.admission before enabling enterprise mode.",
         )
 
 

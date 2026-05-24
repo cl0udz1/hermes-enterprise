@@ -84,3 +84,23 @@ The second implementation slice is Memory Manager governance:
 5. This is a redaction boundary, not full tenant-scoped memory isolation,
    provider-specific ACLs, durable quarantine workflow, or semantic memory
    classification.
+
+## Third MVP-1 Slice
+
+The third implementation slice is Plugin and MCP admission:
+
+1. `hermes_cli/plugins.py` checks enterprise admission before importing an
+   enabled plugin and before accepting plugin-provided tool registrations.
+2. `tools/mcp_tool.py` checks enterprise admission before starting new MCP
+   servers and before registering each discovered MCP tool or MCP utility tool.
+3. `enterprise/admission.py` defines deterministic decisions for plugin
+   manifests, plugin tools, MCP servers, and MCP tools, with bundled plugins
+   trusted by source and user/project/entrypoint plugins requiring explicit
+   trust or allow-list configuration in enterprise mode.
+4. Enterprise-off mode preserves normal Hermes plugin and MCP behavior.
+5. Enterprise-on mode quarantines unapproved plugin imports, unmanifested
+   plugin tools, unapproved MCP servers, and undeclared MCP tools before they
+   become model-visible tools.
+6. This is an admission boundary, not full plugin sandboxing, code-signature
+   verification, dynamic revocation of already-running MCP servers, or
+   provider-specific memory/model plugin governance.

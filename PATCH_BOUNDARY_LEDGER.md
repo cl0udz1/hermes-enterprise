@@ -9,15 +9,25 @@ cannot be controlled any other way.
 
 ## Current Status
 
-Two enterprise runtime authority patches exist:
+Seven enterprise runtime authority patch points exist:
 
 1. MVP-0 Action Firewall v0 patches the Hermes tool execution preflight in
    `agent/tool_executor.py`.
 2. MVP-0 Tool-Result Sanitizer v0 patches the Hermes tool-result message helper
    in `agent/tool_dispatch_helpers.py`.
+3. MVP-1 Chat Completions Provider Egress Guard patches provider payload
+   assembly in `agent/transports/chat_completions.py`.
+4. MVP-1 Memory Manager Governance Guard patches memory provider orchestration
+   in `agent/memory_manager.py`.
+5. MVP-1 Plugin/MCP Admission Guard patches plugin import and plugin tool
+   registration in `hermes_cli/plugins.py`.
+6. MVP-1 Plugin/MCP Admission Guard patches MCP server startup and MCP tool
+   registration in `tools/mcp_tool.py`.
+7. Enterprise Doctor patches `hermes_cli/doctor.py` for diagnostics only.
 
-The patch is disabled by default through `enterprise.enabled: false`. It does
-not patch provider egress, memory, gateway, plugin admission, or cron authority.
+The patches are disabled by default through `enterprise.enabled: false`. They do
+not yet patch gateway identity, cron authority, access grants, or secret broker
+authority.
 
 Sandbox Enforcement v0 extends the existing enterprise action-firewall module
 without touching a new mature Hermes core runtime file.
@@ -302,6 +312,66 @@ Notes:
 - This is a redaction boundary, not tenant-scoped memory isolation, semantic
   memory classification, durable quarantine review, provider-specific recall
   ACLs, or cross-provider deletion enforcement.
+
+### Patch: Plugin/MCP Admission Guard
+
+Status: MVP-1 slice
+Owner: downstream enterprise fork
+Date: 2026-05-24
+Upstream base: `81e9309ad`
+
+Invariant:
+- In enterprise mode, unapproved plugins must not import, plugin-provided tools
+  must not register unless declared, unapproved MCP servers must not start, and
+  undeclared MCP tools must not become model-visible registry tools.
+- When enterprise mode is disabled, existing Hermes plugin and MCP behavior
+  must stay unchanged.
+
+Why plugin/sidecar cannot enforce it:
+- A plugin cannot be the authority that decides whether its own code is safe to
+  import.
+- An external sidecar cannot reliably stop Hermes from exposing a newly
+  discovered MCP tool after the MCP client has connected and registered schemas.
+
+Patch shape:
+- Add deterministic admission decisions in `enterprise/admission.py`.
+- Check plugin manifests before import inside `PluginManager`.
+- Check plugin-provided tools inside `PluginContext.register_tool(...)`.
+- Check MCP server configs before connection and MCP tools before registry
+  registration.
+
+Files touched:
+- `hermes_cli/plugins.py`
+- `tools/mcp_tool.py`
+- `enterprise/admission.py`
+- `enterprise/contracts.py`
+- `enterprise/config.py`
+- `enterprise/doctor.py`
+- `tests/enterprise/test_plugin_mcp_admission.py`
+- `tests/enterprise/test_enterprise_doctor.py`
+
+Enterprise-off compatibility:
+- `tests/enterprise/test_plugin_mcp_admission.py::test_admission_disabled_allows_untrusted_plugin_without_audit`
+- `tests/enterprise/test_plugin_mcp_admission.py::test_enterprise_off_plugin_tool_registration_is_unchanged`
+
+Enterprise-on security gate:
+- `tests/enterprise/test_plugin_mcp_admission.py::test_untrusted_plugin_is_not_imported_in_enterprise_mode`
+- `tests/enterprise/test_plugin_mcp_admission.py::test_plugin_tool_admission_requires_admitted_plugin`
+- `tests/enterprise/test_plugin_mcp_admission.py::test_approved_plugin_can_only_register_declared_tools`
+- `tests/enterprise/test_plugin_mcp_admission.py::test_untrusted_mcp_server_is_not_started_in_enterprise_mode`
+- `tests/enterprise/test_plugin_mcp_admission.py::test_mcp_tool_registration_requires_declared_tool`
+
+Rollback plan:
+- Set `enterprise.enabled: false` to preserve normal Hermes behavior.
+- If the patch itself must be removed, delete the enterprise admission calls in
+  `PluginManager`, `PluginContext.register_tool(...)`, `register_mcp_servers`,
+  and `_register_server_tools(...)`, keeping the enterprise module inert.
+
+Notes:
+- This is an admission boundary. It does not claim plugin code sandboxing,
+  code-signature verification, runtime syscall/network sandboxing, dynamic
+  revocation of already-running MCP servers, or coverage of the separate memory
+  and model-provider plugin discovery systems.
 
 ## Entry Template
 
