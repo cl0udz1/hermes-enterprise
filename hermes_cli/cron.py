@@ -101,6 +101,12 @@ def cron_list(show_all: bool = False):
         profile = job.get("profile")
         if profile:
             print(f"    Profile:   {profile}")
+        owner_id = job.get("owner_id")
+        if owner_id:
+            print(f"    Owner:     {owner_id}")
+        expires_at = job.get("expires_at")
+        if expires_at:
+            print(f"    Expires:   {expires_at}")
 
         # Execution history
         last_status = job.get("last_status")
@@ -179,6 +185,10 @@ def cron_create(args):
         workdir=getattr(args, "workdir", None),
         profile=getattr(args, "profile", None),
         no_agent=getattr(args, "no_agent", False) or None,
+        owner_id=getattr(args, "owner_id", None),
+        intent=getattr(args, "intent", None),
+        expires_at=getattr(args, "expires_at", None),
+        policy_context=getattr(args, "policy_context", None),
     )
     if not result.get("success"):
         print(color(f"Failed to create job: {result.get('error', 'unknown error')}", Colors.RED))
@@ -197,6 +207,10 @@ def cron_create(args):
         print(f"  Workdir: {job_data['workdir']}")
     if job_data.get("profile"):
         print(f"  Profile: {job_data['profile']}")
+    if job_data.get("owner_id"):
+        print(f"  Owner: {job_data['owner_id']}")
+    if job_data.get("expires_at"):
+        print(f"  Expires: {job_data['expires_at']}")
     print(f"  Next run: {result['next_run_at']}")
     return 0
 
@@ -244,6 +258,10 @@ def cron_edit(args):
         workdir=getattr(args, "workdir", None),
         profile=getattr(args, "profile", None),
         no_agent=getattr(args, "no_agent", None),
+        owner_id=getattr(args, "owner_id", None),
+        intent=getattr(args, "intent", None),
+        expires_at=getattr(args, "expires_at", None),
+        policy_context=getattr(args, "policy_context", None),
     )
     if not result.get("success"):
         print(color(f"Failed to update job: {result.get('error', 'unknown error')}", Colors.RED))
@@ -265,6 +283,10 @@ def cron_edit(args):
         print(f"  Workdir: {updated['workdir']}")
     if updated.get("profile"):
         print(f"  Profile: {updated['profile']}")
+    if updated.get("owner_id"):
+        print(f"  Owner: {updated['owner_id']}")
+    if updated.get("expires_at"):
+        print(f"  Expires: {updated['expires_at']}")
     return 0
 
 

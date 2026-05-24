@@ -29,6 +29,7 @@ def test_enterprise_doctor_disabled_mode_is_machine_readable(tmp_path):
         "memory_governance",
         "plugin_mcp_admission",
         "gateway_identity",
+        "cron_governance",
         "streaming_policy",
     }
 

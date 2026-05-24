@@ -151,6 +151,10 @@ class TestCreateJob:
                     "name": "test-job",
                     "schedule": "*/5 * * * *",
                     "prompt": "do something",
+                    "owner_id": "employee-researcher",
+                    "intent": "scheduled research",
+                    "expires_at": "2026-06-01T00:00:00Z",
+                    "policy_context": {"policy_id": "cron-policy"},
                 })
                 assert resp.status == 200
                 data = await resp.json()
@@ -160,6 +164,10 @@ class TestCreateJob:
                 assert call_kwargs["name"] == "test-job"
                 assert call_kwargs["schedule"] == "*/5 * * * *"
                 assert call_kwargs["prompt"] == "do something"
+                assert call_kwargs["owner_id"] == "employee-researcher"
+                assert call_kwargs["intent"] == "scheduled research"
+                assert call_kwargs["expires_at"] == "2026-06-01T00:00:00Z"
+                assert call_kwargs["policy_context"] == {"policy_id": "cron-policy"}
 
     @pytest.mark.asyncio
     async def test_create_job_missing_name(self, adapter):
@@ -311,6 +319,36 @@ class TestUpdateJob:
                 sanitized = call_args[0][1]
                 assert "name" in sanitized
                 assert "schedule" in sanitized
+
+    @pytest.mark.asyncio
+    async def test_update_job_allows_governance_fields(self, adapter):
+        """PATCH /api/jobs/{id} allows enterprise cron governance metadata."""
+        app = _create_app(adapter)
+        updated_job = {**SAMPLE_JOB, "owner_id": "employee-researcher"}
+        mock_update = MagicMock(return_value=updated_job)
+        async with TestClient(TestServer(app)) as cli:
+            with patch(
+                f"{_MOD}._CRON_AVAILABLE", True
+            ), patch(
+                f"{_MOD}._cron_update", mock_update
+            ):
+                resp = await cli.patch(
+                    f"/api/jobs/{VALID_JOB_ID}",
+                    json={
+                        "owner_id": "employee-researcher",
+                        "intent": "scheduled research",
+                        "expires_at": "2026-06-01T00:00:00Z",
+                        "policy_context": {"policy_id": "cron-policy"},
+                        "evil_field": "ignored",
+                    },
+                )
+                assert resp.status == 200
+                sanitized = mock_update.call_args[0][1]
+                assert sanitized["owner_id"] == "employee-researcher"
+                assert sanitized["intent"] == "scheduled research"
+                assert sanitized["expires_at"] == "2026-06-01T00:00:00Z"
+                assert sanitized["policy_context"] == {"policy_id": "cron-policy"}
+                assert "evil_field" not in sanitized
 
     @pytest.mark.asyncio
     async def test_update_job_rejects_unknown_fields(self, adapter):

@@ -327,6 +327,14 @@ def _format_job(job: Dict[str, Any]) -> Dict[str, Any]:
         result["workdir"] = job["workdir"]
     if job.get("profile"):
         result["profile"] = job["profile"]
+    if job.get("owner_id"):
+        result["owner_id"] = job["owner_id"]
+    if job.get("intent"):
+        result["intent"] = job["intent"]
+    if job.get("expires_at"):
+        result["expires_at"] = job["expires_at"]
+    if job.get("policy_context"):
+        result["policy_context"] = job["policy_context"]
     return result
 
 
@@ -351,6 +359,10 @@ def cronjob(
     workdir: Optional[str] = None,
     profile: Optional[str] = None,
     no_agent: Optional[bool] = None,
+    owner_id: Optional[str] = None,
+    intent: Optional[str] = None,
+    expires_at: Optional[str] = None,
+    policy_context: Optional[Any] = None,
     task_id: str = None,
 ) -> str:
     """Unified cron job management tool."""
@@ -418,6 +430,10 @@ def cronjob(
                 workdir=_normalize_optional_job_value(workdir),
                 profile=_normalize_optional_job_value(profile),
                 no_agent=_no_agent,
+                owner_id=_normalize_optional_job_value(owner_id),
+                intent=_normalize_optional_job_value(intent),
+                expires_at=_normalize_optional_job_value(expires_at),
+                policy_context=policy_context,
             )
             return json.dumps(
                 {
@@ -569,6 +585,14 @@ def cronjob(
                             success=False,
                         )
                 updates["no_agent"] = target_no_agent
+            if owner_id is not None:
+                updates["owner_id"] = _normalize_optional_job_value(owner_id)
+            if intent is not None:
+                updates["intent"] = _normalize_optional_job_value(intent)
+            if expires_at is not None:
+                updates["expires_at"] = _normalize_optional_job_value(expires_at)
+            if policy_context is not None:
+                updates["policy_context"] = policy_context
             if repeat is not None:
                 # Normalize: treat 0 or negative as None (infinite)
                 normalized_repeat = None if repeat <= 0 else repeat
@@ -712,6 +736,22 @@ Important safety rule: cron-run sessions should not recursively schedule more cr
                 "type": "string",
                 "description": "Optional Hermes profile name to run the job under. When set, the scheduler resolves that profile, applies a context-local Hermes home override, loads that profile's config/.env for the run, and bridges HERMES_HOME into subprocesses. Any temporary process-environment changes from profile .env loading are restored after the job exits. Use 'default' for the root Hermes profile. Named profiles must already exist. When unset (default), preserves the scheduler's existing profile. On update, pass an empty string to clear. Jobs with profile run sequentially (not parallel) to keep profile-scoped runtime state isolated."
             },
+            "owner_id": {
+                "type": "string",
+                "description": "Enterprise subject that owns this scheduled action. Required when enterprise cron governance is enabled."
+            },
+            "intent": {
+                "type": "string",
+                "description": "Short business intent for the scheduled action. Required when enterprise cron governance is enabled."
+            },
+            "expires_at": {
+                "type": "string",
+                "description": "ISO timestamp after which enterprise mode refuses to run the job, e.g. 2026-06-30T00:00:00Z."
+            },
+            "policy_context": {
+                "type": "object",
+                "description": "Enterprise policy envelope metadata. Include a real binding key such as policy_id, policy_version, bundle_hash, approval_id, decision_id, assignment_id, or risk_tier."
+            },
         },
         "required": ["action"]
     }
@@ -768,6 +808,10 @@ registry.register(
         workdir=args.get("workdir"),
         profile=args.get("profile"),
         no_agent=args.get("no_agent"),
+        owner_id=args.get("owner_id"),
+        intent=args.get("intent"),
+        expires_at=args.get("expires_at"),
+        policy_context=args.get("policy_context"),
         task_id=kw.get("task_id"),
     ))(),
     check_fn=check_cronjob_requirements,

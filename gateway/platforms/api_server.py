@@ -2409,7 +2409,20 @@ class APIServerAdapter(BasePlatformAdapter):
 
     _JOB_ID_RE = __import__("re").compile(r"[a-f0-9]{12}")
     # Allowed fields for update — prevents clients injecting arbitrary keys
-    _UPDATE_ALLOWED_FIELDS = {"name", "schedule", "prompt", "deliver", "skills", "skill", "repeat", "enabled"}
+    _UPDATE_ALLOWED_FIELDS = {
+        "name",
+        "schedule",
+        "prompt",
+        "deliver",
+        "skills",
+        "skill",
+        "repeat",
+        "enabled",
+        "owner_id",
+        "intent",
+        "expires_at",
+        "policy_context",
+    }
     _MAX_NAME_LENGTH = 200
     _MAX_PROMPT_LENGTH = 5000
 
@@ -2462,6 +2475,10 @@ class APIServerAdapter(BasePlatformAdapter):
             deliver = body.get("deliver", "local")
             skills = body.get("skills")
             repeat = body.get("repeat")
+            owner_id = body.get("owner_id")
+            intent = body.get("intent")
+            expires_at = body.get("expires_at")
+            policy_context = body.get("policy_context")
 
             if not name:
                 return web.json_response({"error": "Name is required"}, status=400)
@@ -2488,6 +2505,14 @@ class APIServerAdapter(BasePlatformAdapter):
                 kwargs["skills"] = skills
             if repeat is not None:
                 kwargs["repeat"] = repeat
+            if owner_id is not None:
+                kwargs["owner_id"] = owner_id
+            if intent is not None:
+                kwargs["intent"] = intent
+            if expires_at is not None:
+                kwargs["expires_at"] = expires_at
+            if policy_context is not None:
+                kwargs["policy_context"] = policy_context
 
             job = _cron_create(**kwargs)
             return web.json_response({"job": job})

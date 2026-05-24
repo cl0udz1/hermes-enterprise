@@ -79,6 +79,34 @@ def _coerce_job_text(value: Any, fallback: str = "") -> str:
     return str(value)
 
 
+def _normalize_optional_text(value: Any) -> Optional[str]:
+    if value in (None, False):
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _normalize_policy_context(value: Any) -> Optional[Any]:
+    if value in (None, "", False):
+        return None
+    if isinstance(value, (dict, list)):
+        return copy.deepcopy(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return {"policy_id": text}
+        if parsed in (None, "", {}, []):
+            return None
+        if isinstance(parsed, (dict, list)):
+            return parsed
+        return {"policy_id": str(parsed)}
+    return {"policy_id": str(value)}
+
+
 def _schedule_display_for_job(job: Dict[str, Any]) -> str:
     display = _coerce_job_text(job.get("schedule_display")).strip()
     if display:
@@ -130,6 +158,11 @@ def _normalize_job_record(job: Dict[str, Any]) -> Dict[str, Any]:
 
     profile = _coerce_job_text(normalized.get("profile")).strip()
     normalized["profile"] = profile or None
+
+    normalized["owner_id"] = _normalize_optional_text(normalized.get("owner_id"))
+    normalized["intent"] = _normalize_optional_text(normalized.get("intent"))
+    normalized["expires_at"] = _normalize_optional_text(normalized.get("expires_at"))
+    normalized["policy_context"] = _normalize_policy_context(normalized.get("policy_context"))
 
     return normalized
 
@@ -524,6 +557,10 @@ def create_job(
     workdir: Optional[str] = None,
     profile: Optional[str] = None,
     no_agent: bool = False,
+    owner_id: Optional[str] = None,
+    intent: Optional[str] = None,
+    expires_at: Optional[str] = None,
+    policy_context: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
     Create a new cron job.
@@ -574,6 +611,11 @@ def create_job(
                 delivery). Requires ``script`` to be set. Ideal for classic
                 watchdogs and periodic alerts that don't need LLM reasoning.
 
+        owner_id: Enterprise subject that owns the scheduled action.
+        intent: Enterprise business intent for why the job may run.
+        expires_at: ISO timestamp after which enterprise mode refuses the job.
+        policy_context: Enterprise policy envelope metadata (mapping or JSON).
+
     Returns:
         The created job dict
     """
@@ -608,6 +650,10 @@ def create_job(
     normalized_workdir = _normalize_workdir(workdir)
     normalized_profile = _normalize_profile(profile)
     normalized_no_agent = bool(no_agent)
+    normalized_owner_id = _normalize_optional_text(owner_id)
+    normalized_intent = _normalize_optional_text(intent)
+    normalized_expires_at = _normalize_optional_text(expires_at)
+    normalized_policy_context = _normalize_policy_context(policy_context)
 
     # no_agent jobs are meaningless without a script — the script IS the job.
     # Surface this as a clear ValueError at create time so bad configs never
@@ -662,6 +708,10 @@ def create_job(
         "enabled_toolsets": normalized_toolsets,
         "workdir": normalized_workdir,
         "profile": normalized_profile,
+        "owner_id": normalized_owner_id,
+        "intent": normalized_intent,
+        "expires_at": normalized_expires_at,
+        "policy_context": normalized_policy_context,
     }
 
     jobs = load_jobs()
@@ -750,6 +800,13 @@ def update_job(job_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]
                 updates["profile"] = None
             else:
                 updates["profile"] = _normalize_profile(_profile)
+
+        for _field in ("owner_id", "intent", "expires_at"):
+            if _field in updates:
+                updates[_field] = _normalize_optional_text(updates[_field])
+
+        if "policy_context" in updates:
+            updates["policy_context"] = _normalize_policy_context(updates["policy_context"])
 
         updated = _apply_skill_fields({**job, **updates})
         schedule_changed = "schedule" in updates
