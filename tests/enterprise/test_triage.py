@@ -182,6 +182,38 @@ def test_revoked_or_expired_grant_denies_action():
     assert "grant_status:revoked" in decision.detectors
 
 
+def test_valid_access_grant_allows_high_risk_action():
+    engine = RuntimeTriageEngine(now=NOW)
+    grant = AccessGrant(
+        grant_id="grant-valid",
+        request_id="stage-1",
+        subject_id="user-1",
+        resource="actionhash",
+        actions=["terminal", "execute"],
+        expires_at="2026-05-20T12:30:00Z",
+        policy_version="policy-1",
+        action_hash="actionhash",
+        tool_name="terminal",
+        approved_by="manager-1",
+        stage_id="stage-1",
+    )
+
+    decision = engine.evaluate(
+        TriageRequest(
+            subject_id="user-1",
+            tool_name="terminal",
+            tool_args={"command": "pytest"},
+            action_hash="actionhash",
+            requested_side_effects=("process_spawn",),
+            grants=(grant,),
+        )
+    )
+
+    assert decision.outcome is DecisionOutcome.ALLOW
+    assert decision.risk_tier is RiskTier.CRITICAL
+    assert "grant_status:valid" in decision.detectors
+
+
 def test_policy_decision_cache_is_keyed_and_expires():
     decision = PolicyDecision(
         decision_id="decision-1",

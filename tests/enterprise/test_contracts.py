@@ -110,6 +110,10 @@ def test_contracts_round_trip_to_stable_json():
             expires_at="2026-05-20T02:00:00Z",
             policy_version="policy-1",
             created_at="2026-05-20T00:00:04Z",
+            approved_by="manager-1",
+            stage_id="stage-1",
+            action_hash="actionhash",
+            tool_name="write_file",
         ),
         ArtifactVaultRecord(
             artifact_id="artifact-1",

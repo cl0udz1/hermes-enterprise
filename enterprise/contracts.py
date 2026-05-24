@@ -35,6 +35,7 @@ class AuditEventType(str, Enum):
     ACTION_APPROVED = "action_approved"
     ACTION_STAGED = "action_staged"
     ACTION_EXECUTED = "action_executed"
+    ACCESS_GRANT_REVOKED = "access_grant_revoked"
     RESULT_SANITIZED = "result_sanitized"
     PROVIDER_EGRESS_SANITIZED = "provider_egress_sanitized"
     MEMORY_GOVERNANCE_SANITIZED = "memory_governance_sanitized"
@@ -303,6 +304,10 @@ class AccessGrant(JsonContract):
     policy_version: str
     created_at: str = ""
     revoked_at: str = ""
+    approved_by: str = ""
+    stage_id: str = ""
+    action_hash: str = ""
+    tool_name: str = ""
 
 
 @dataclass(frozen=True)

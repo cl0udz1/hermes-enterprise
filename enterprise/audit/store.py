@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from enterprise.contracts import AuditEvent
@@ -25,7 +26,7 @@ class AuditStore:
         return conn
 
     def _init_schema(self) -> None:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS audit_events (
@@ -45,7 +46,7 @@ class AuditStore:
 
     def append_event(self, event: AuditEvent) -> int:
         """Append one audit event and return its sequence number."""
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             cursor = conn.execute(
                 """
                 INSERT INTO audit_events (
@@ -75,12 +76,12 @@ class AuditStore:
         if limit is not None:
             query += " LIMIT ?"
             params = (limit,)
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             rows = conn.execute(query, params).fetchall()
         return [AuditEvent.from_json(row["event_json"]) for row in rows]
 
     def get_event(self, event_id: str) -> AuditEvent | None:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             row = conn.execute(
                 "SELECT event_json FROM audit_events WHERE event_id = ?",
                 (event_id,),
@@ -90,6 +91,6 @@ class AuditStore:
         return AuditEvent.from_json(row["event_json"])
 
     def count(self) -> int:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             row = conn.execute("SELECT COUNT(*) AS count FROM audit_events").fetchone()
         return int(row["count"])
