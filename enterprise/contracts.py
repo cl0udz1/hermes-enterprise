@@ -36,6 +36,7 @@ class AuditEventType(str, Enum):
     ACTION_STAGED = "action_staged"
     ACTION_EXECUTED = "action_executed"
     RESULT_SANITIZED = "result_sanitized"
+    PROVIDER_EGRESS_SANITIZED = "provider_egress_sanitized"
     SANDBOX_VIOLATION = "sandbox_violation"
     HYDRATION_DECISION = "hydration_decision"
     AUDIT_ERROR = "audit_error"
@@ -186,6 +187,18 @@ class RuntimeTriageDecision(JsonContract):
     latency_ms: int
     escalated: bool
     reason: str = ""
+
+
+@dataclass(frozen=True)
+class ProviderEgressDecision(JsonContract):
+    decision_id: str
+    route: str
+    changed: bool
+    findings: list[str]
+    raw_sha256: str
+    sanitized_sha256: str
+    streaming_posture: str = "request_payload_only"
+    audit_event_ids: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

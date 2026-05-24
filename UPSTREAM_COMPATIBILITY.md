@@ -304,6 +304,21 @@ enterprise compile check passed
 Enterprise MVP-0 gate passed.
 ```
 
+Current branch verification after the first MVP-1 provider-egress slice:
+
+```text
+python scripts\enterprise_mvp0_gate.py
+```
+
+Result:
+
+```text
+enterprise compile check passed
+74 enterprise tests passed
+15 targeted Hermes authority-seam tests passed
+Enterprise MVP-0 gate passed.
+```
+
 Additional environment note:
 
 ```text
@@ -371,13 +386,19 @@ The current runtime patches are intentionally small:
    does not add a new runtime patch.
 10. The MVP-0 closure gate adds a local gate runner, CI workflow, and readiness
     document only. It does not add runtime authority.
+11. The first MVP-1 provider-egress slice adds one runtime patch in
+    `agent/transports/chat_completions.py`, after provider-profile and legacy
+    Chat Completions payload assembly. The implementation lives in
+    `enterprise/provider_egress.py`, and enterprise mode remains disabled by
+    default.
 
 Enterprise mode remains disabled by default, and focused tests cover
 enterprise-off behavior plus existing tool-loop guardrail behavior.
 
 The next meaningful compatibility risks appear when wiring hydration into
-provider or memory paths, adding approved staged execution, provider egress
-policy, memory gates, plugin admission, gateway identity, cron authority, or
-team/admin fast-path assignment management. The Enterprise Doctor v0 patch is
-lower runtime risk because it only reads diagnostic state and reports issues;
-the release-gate regression and closure-gate slices add no runtime authority.
+provider or memory paths, expanding provider egress beyond Chat Completions,
+adding approved staged execution, memory gates, plugin admission, gateway
+identity, cron authority, or team/admin fast-path assignment management. The
+Enterprise Doctor v0 patch is lower runtime risk because it only reads
+diagnostic state and reports issues; the release-gate regression and
+closure-gate slices add no runtime authority.

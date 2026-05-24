@@ -99,6 +99,23 @@ def _is_gemini_openai_compat_base_url(base_url: Any) -> bool:
     return normalized.endswith("/openai")
 
 
+def _apply_enterprise_provider_egress(
+    api_kwargs: dict[str, Any],
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    """Apply downstream enterprise provider egress governance."""
+
+    from enterprise.provider_egress import govern_provider_payload
+
+    governed_payload, _decision = govern_provider_payload(
+        api_kwargs,
+        root_config=params.get("enterprise_root_config"),
+        audit_store=params.get("enterprise_audit_store"),
+        route="chat_completions",
+    )
+    return governed_payload
+
+
 class ChatCompletionsTransport(ProviderTransport):
     """Transport for api_mode='chat_completions'.
 
@@ -188,6 +205,8 @@ class ChatCompletionsTransport(ProviderTransport):
             max_tokens_param_fn: callable — returns {max_tokens: N} or {max_completion_tokens: N}
             reasoning_config: dict | None
             request_overrides: dict | None
+            enterprise_root_config: dict | None
+            enterprise_audit_store: AuditStore | None
             session_id: str | None
             model_lower: str — lowercase model name for pattern matching
             # Provider profile path (all per-provider quirks live in providers/)
@@ -403,7 +422,7 @@ class ChatCompletionsTransport(ProviderTransport):
         if overrides:
             api_kwargs.update(overrides)
 
-        return api_kwargs
+        return _apply_enterprise_provider_egress(api_kwargs, params)
 
     def _build_kwargs_from_profile(self, profile, model, sanitized, tools, params):
         """Build API kwargs using a ProviderProfile — single path, no legacy flags.
@@ -519,7 +538,7 @@ class ChatCompletionsTransport(ProviderTransport):
         if extra_body:
             api_kwargs["extra_body"] = extra_body
 
-        return api_kwargs
+        return _apply_enterprise_provider_egress(api_kwargs, params)
 
     def normalize_response(self, response: Any, **kwargs) -> NormalizedResponse:
         """Normalize OpenAI ChatCompletion to NormalizedResponse.
