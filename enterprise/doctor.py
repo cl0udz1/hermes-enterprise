@@ -77,6 +77,7 @@ def run_enterprise_doctor(
         _check_memory_governance(),
         _check_plugin_mcp_admission(),
         _check_gateway_identity(mode, enterprise_cfg),
+        _check_cron_governance(mode, enterprise_cfg),
         _check_streaming_policy(mode, enterprise_cfg),
     ]
     return EnterpriseDoctorReport(
@@ -624,6 +625,105 @@ def _check_gateway_identity(
             "Gateway identity",
             str(exc),
             "Repair enterprise.gateway_identity before enabling enterprise gateway mode.",
+        )
+
+
+def _check_cron_governance(
+    mode: EnterpriseMode,
+    enterprise_cfg: Mapping[str, Any],
+) -> EnterpriseDoctorCheck:
+    cron_cfg = enterprise_cfg.get("cron_governance", {})
+    if not isinstance(cron_cfg, Mapping):
+        return _fail(
+            "cron_governance",
+            "Cron governance",
+            "enterprise.cron_governance must be a mapping",
+            "Restore enterprise.cron_governance to a mapping with owner, intent, expiry, and policy settings.",
+        )
+    if not mode.enabled:
+        return _pass("cron_governance", "Cron governance", "not enforced while enterprise mode is disabled")
+    if not bool(cron_cfg.get("enabled", True)):
+        return _edition_sensitive_missing(
+            mode,
+            "cron_governance",
+            "Cron governance",
+            "scheduled-action governance is disabled",
+            "Enable enterprise.cron_governance before team rollout.",
+        )
+    try:
+        from datetime import datetime, timedelta, timezone
+
+        from enterprise.contracts import DecisionOutcome
+        from enterprise.cron_governance import evaluate_cron_job
+
+        class _ProbeAuditStore:
+            def append_event(self, _event):
+                return 1
+
+        now = datetime.now(timezone.utc)
+        root_config = {"enterprise": {"enabled": True, "cron_governance": dict(cron_cfg)}}
+        valid_job = {
+            "id": "doctor-valid-cron",
+            "owner_id": "doctor-subject",
+            "intent": "doctor probe",
+            "expires_at": (now + timedelta(days=1)).isoformat(),
+            "policy_context": {"policy_id": "doctor-policy", "policy_version": "v1"},
+            "schedule": {"kind": "interval", "minutes": 60},
+        }
+        missing_owner_job = {**valid_job, "id": "doctor-missing-owner", "owner_id": ""}
+        expired_job = {
+            **valid_job,
+            "id": "doctor-expired",
+            "expires_at": (now - timedelta(minutes=1)).isoformat(),
+        }
+
+        valid = evaluate_cron_job(
+            valid_job,
+            root_config=root_config,
+            audit_store=_ProbeAuditStore(),
+            now=now,
+        )
+        missing_owner = evaluate_cron_job(
+            missing_owner_job,
+            root_config=root_config,
+            audit_store=_ProbeAuditStore(),
+            now=now,
+        )
+        expired = evaluate_cron_job(
+            expired_job,
+            root_config=root_config,
+            audit_store=_ProbeAuditStore(),
+            now=now,
+        )
+
+        if valid.outcome is not DecisionOutcome.ALLOW:
+            return _fail(
+                "cron_governance",
+                "Cron governance",
+                f"valid cron intent probe was denied: {valid.reason}",
+                "Repair enterprise.cron_governance valid envelope evaluation.",
+            )
+        if missing_owner.outcome is not DecisionOutcome.DENY:
+            return _fail(
+                "cron_governance",
+                "Cron governance",
+                "missing-owner cron probe was not denied",
+                "Repair enterprise.cron_governance owner enforcement.",
+            )
+        if expired.outcome is not DecisionOutcome.DENY:
+            return _fail(
+                "cron_governance",
+                "Cron governance",
+                "expired cron probe was not denied",
+                "Repair enterprise.cron_governance expiry enforcement.",
+            )
+        return _pass("cron_governance", "Cron governance", "owner, intent, expiry, and policy probes passed")
+    except Exception as exc:
+        return _fail(
+            "cron_governance",
+            "Cron governance",
+            str(exc),
+            "Repair enterprise.cron_governance before enabling enterprise cron mode.",
         )
 
 

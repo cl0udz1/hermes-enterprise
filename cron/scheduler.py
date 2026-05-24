@@ -29,7 +29,7 @@ except ImportError:
     except ImportError:
         msvcrt = None
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 
 # Add parent directory to path for imports BEFORE repo-level imports.
 # Without this, standalone invocations (e.g. after `hermes update` reloads
@@ -1131,6 +1131,83 @@ def _scan_assembled_cron_prompt(assembled: str, job: dict) -> str:
     return assembled
 
 
+def _evaluate_enterprise_cron_governance(job: dict, root_config: Optional[dict] = None):
+    try:
+        from enterprise.cron_governance import evaluate_cron_job
+
+        return evaluate_cron_job(job, root_config=root_config)
+    except Exception as exc:
+        logger.error("Enterprise cron governance failed for job '%s': %s", job.get("id", "?"), exc, exc_info=True)
+        enabled = False
+        try:
+            from enterprise.mode import EnterpriseMode
+
+            enabled = EnterpriseMode.from_config(root_config).enabled
+        except Exception:
+            enabled = False
+        if enabled:
+            from enterprise.contracts import CronGovernanceDecision, DecisionOutcome, stable_hash
+
+            job_id = str(job.get("id") or "unknown")
+            owner_id = str(job.get("owner_id") or "").strip()
+            return CronGovernanceDecision(
+                decision_id=stable_hash(
+                    {
+                        "job_id": job_id,
+                        "owner_id": owner_id,
+                        "outcome": DecisionOutcome.DENY.value,
+                        "reason": "cron_governance_evaluator_failed",
+                        "error": str(exc),
+                    }
+                )[:32],
+                outcome=DecisionOutcome.DENY,
+                reason="cron_governance_evaluator_failed",
+                job_id=job_id,
+                owner_id=owner_id,
+            )
+        return None
+
+
+def _cron_governance_allows(decision: Any) -> bool:
+    if decision is None:
+        return True
+    try:
+        from enterprise.cron_governance import cron_governance_allows_execution
+
+        return cron_governance_allows_execution(decision)
+    except Exception:
+        return True
+
+
+def _cron_governance_blocked_tuple(job: dict, decision: Any) -> tuple[bool, str, str, Optional[str]]:
+    job_id = str(job.get("id") or "unknown")
+    job_name = str(job.get("name") or job.get("prompt") or job_id or "cron job")
+    reason = str(getattr(decision, "reason", "") or "cron_governance_denied")
+    now_iso = _hermes_now().strftime("%Y-%m-%d %H:%M:%S")
+    message = f"Enterprise cron governance blocked scheduled execution: {reason}"
+    doc = (
+        f"# Cron Job: {job_name}\n\n"
+        f"**Job ID:** {job_id}\n"
+        f"**Run Time:** {now_iso}\n"
+        f"**Status:** BLOCKED\n\n"
+        f"{message}\n"
+    )
+    logger.warning("Job '%s' blocked by enterprise cron governance: %s", job_id, reason)
+    return False, doc, "", message
+
+
+def _bind_cron_governance_to_agent(agent: Any, decision: Any, root_config: Optional[dict]) -> None:
+    try:
+        if root_config is not None:
+            setattr(agent, "enterprise_root_config", root_config)
+            setattr(agent, "_enterprise_root_config", root_config)
+        from enterprise.cron_governance import bind_cron_governance
+
+        bind_cron_governance(agent, decision)
+    except Exception:
+        return
+
+
 def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
     """Execute a single cron job, applying any per-job profile override."""
     job_id = job["id"]
@@ -1147,6 +1224,14 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
     """
     job_id = job["id"]
     job_name = str(job.get("name") or job.get("prompt") or job_id or "cron job")
+    _root_config = {}
+    try:
+        _root_config = load_config() or {}
+    except Exception as exc:
+        logger.debug("Job '%s': failed to load config for enterprise cron governance: %s", job_id, exc)
+    _cron_governance_decision = _evaluate_enterprise_cron_governance(job, _root_config)
+    if not _cron_governance_allows(_cron_governance_decision):
+        return _cron_governance_blocked_tuple(job, _cron_governance_decision)
 
     # ---------------------------------------------------------------
     # no_agent short-circuit — the script IS the job, no LLM involvement.
@@ -1584,6 +1669,7 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
             session_id=_cron_session_id,
             session_db=_session_db,
         )
+        _bind_cron_governance_to_agent(agent, _cron_governance_decision, _cfg or _root_config)
         
         # Run the agent with an *inactivity*-based timeout: the job can run
         # for hours if it's actively calling tools / receiving stream tokens,

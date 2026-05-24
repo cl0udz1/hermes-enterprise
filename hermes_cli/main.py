@@ -11152,6 +11152,13 @@ def main():
         "--profile",
         help="Hermes profile name to run the job under. Use 'default' for the root profile. Named profiles must already exist. Omit to preserve the scheduler's existing profile.",
     )
+    cron_create.add_argument("--owner-id", help="Enterprise subject that owns this scheduled action.")
+    cron_create.add_argument("--intent", help="Enterprise business intent for this scheduled action.")
+    cron_create.add_argument("--expires-at", help="ISO timestamp after which enterprise mode refuses the job.")
+    cron_create.add_argument(
+        "--policy-context",
+        help="Enterprise policy context as JSON or a policy id string.",
+    )
 
     # cron edit
     cron_edit = cron_subparsers.add_parser(
@@ -11219,6 +11226,13 @@ def main():
     cron_edit.add_argument(
         "--profile",
         help="Hermes profile name to run the job under. Use 'default' for the root profile. Pass empty string to clear.",
+    )
+    cron_edit.add_argument("--owner-id", help="Enterprise subject that owns this scheduled action. Pass empty string to clear.")
+    cron_edit.add_argument("--intent", help="Enterprise business intent for this scheduled action. Pass empty string to clear.")
+    cron_edit.add_argument("--expires-at", help="ISO timestamp after which enterprise mode refuses the job. Pass empty string to clear.")
+    cron_edit.add_argument(
+        "--policy-context",
+        help="Enterprise policy context as JSON or a policy id string. Pass empty string to clear.",
     )
 
     # lifecycle actions

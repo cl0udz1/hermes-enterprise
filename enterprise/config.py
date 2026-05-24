@@ -95,6 +95,15 @@ DEFAULT_ENTERPRISE_CONFIG: dict[str, Any] = {
         "audit_all_decisions": True,
         "assignments": {},
     },
+    "cron_governance": {
+        "enabled": True,
+        "require_owner": True,
+        "require_intent": True,
+        "require_expiry": True,
+        "require_policy_context": True,
+        "max_ttl_days": 90,
+        "audit_all_decisions": True,
+    },
     "sandbox": {
         "enforce_manifests": True,
     },

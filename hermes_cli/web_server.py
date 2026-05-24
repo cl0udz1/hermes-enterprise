@@ -2554,6 +2554,10 @@ class CronJobCreate(BaseModel):
     schedule: str
     name: str = ""
     deliver: str = "local"
+    owner_id: Optional[str] = None
+    intent: Optional[str] = None
+    expires_at: Optional[str] = None
+    policy_context: Optional[Any] = None
 
 
 class CronJobUpdate(BaseModel):
@@ -2679,6 +2683,10 @@ async def create_cron_job(body: CronJobCreate, profile: str = "default"):
             schedule=body.schedule,
             name=body.name,
             deliver=body.deliver,
+            owner_id=body.owner_id,
+            intent=body.intent,
+            expires_at=body.expires_at,
+            policy_context=body.policy_context,
         )
     except Exception as e:
         _log.exception("POST /api/cron/jobs failed")

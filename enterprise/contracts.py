@@ -40,6 +40,7 @@ class AuditEventType(str, Enum):
     MEMORY_GOVERNANCE_SANITIZED = "memory_governance_sanitized"
     AUTHORITY_ADMISSION_DECISION = "authority_admission_decision"
     GATEWAY_IDENTITY_DECISION = "gateway_identity_decision"
+    CRON_GOVERNANCE_DECISION = "cron_governance_decision"
     SANDBOX_VIOLATION = "sandbox_violation"
     HYDRATION_DECISION = "hydration_decision"
     AUDIT_ERROR = "audit_error"
@@ -251,6 +252,31 @@ class GatewayIdentityDecision(JsonContract):
     channel_hash: str = ""
     thread_id_hash: str = ""
     chat_type: str = ""
+    audit_event_ids: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class CronIntentEnvelope(JsonContract):
+    job_id: str
+    owner_id: str
+    intent_hash: str
+    expires_at: str
+    policy_context_hash: str
+    schedule_hash: str = ""
+    created_at: str = ""
+
+
+@dataclass(frozen=True)
+class CronGovernanceDecision(JsonContract):
+    decision_id: str
+    outcome: DecisionOutcome
+    reason: str
+    job_id: str
+    owner_id: str = ""
+    intent_hash: str = ""
+    expires_at: str = ""
+    policy_context_hash: str = ""
+    schedule_hash: str = ""
     audit_event_ids: list[str] = field(default_factory=list)
 
 
