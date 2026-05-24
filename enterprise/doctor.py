@@ -76,6 +76,7 @@ def run_enterprise_doctor(
         _check_provider_egress(),
         _check_memory_governance(),
         _check_plugin_mcp_admission(),
+        _check_gateway_identity(mode, enterprise_cfg),
         _check_streaming_policy(mode, enterprise_cfg),
     ]
     return EnterpriseDoctorReport(
@@ -515,6 +516,114 @@ def _check_plugin_mcp_admission() -> EnterpriseDoctorCheck:
             "Plugin/MCP admission",
             str(exc),
             "Repair enterprise.admission before enabling enterprise mode.",
+        )
+
+
+def _check_gateway_identity(
+    mode: EnterpriseMode,
+    enterprise_cfg: Mapping[str, Any],
+) -> EnterpriseDoctorCheck:
+    gateway_cfg = enterprise_cfg.get("gateway_identity", {})
+    if not isinstance(gateway_cfg, Mapping):
+        return _fail(
+            "gateway_identity",
+            "Gateway identity",
+            "enterprise.gateway_identity must be a mapping",
+            "Restore enterprise.gateway_identity to a mapping with assignments.",
+        )
+    if not mode.enabled:
+        return _pass("gateway_identity", "Gateway identity", "not enforced while enterprise mode is disabled")
+    if not bool(gateway_cfg.get("enabled", True)):
+        return _edition_sensitive_missing(
+            mode,
+            "gateway_identity",
+            "Gateway identity",
+            "gateway subject binding is disabled",
+            "Enable enterprise.gateway_identity before team rollout.",
+        )
+    assignments = gateway_cfg.get("assignments", {})
+    if not isinstance(assignments, (Mapping, list, tuple)):
+        return _fail(
+            "gateway_identity",
+            "Gateway identity",
+            "assignments must be a mapping or list",
+            "Use enterprise.gateway_identity.assignments to map platform users/channels to subjects.",
+        )
+    if not assignments:
+        return _edition_sensitive_missing(
+            mode,
+            "gateway_identity",
+            "Gateway identity",
+            "no gateway subject assignments configured",
+            "Add at least one gateway assignment before allowing enterprise gateway users.",
+        )
+    try:
+        from types import SimpleNamespace
+
+        from enterprise.contracts import DecisionOutcome
+        from enterprise.gateway_identity import evaluate_gateway_identity
+
+        class _ProbeAuditStore:
+            def append_event(self, _event):
+                return 1
+
+        root_config = {
+            "enterprise": {
+                "enabled": True,
+                "gateway_identity": {
+                    "assignments": {
+                        "doctor-assignment": {
+                            "subject_id": "doctor-subject",
+                            "platform": "slack",
+                            "user_id": "doctor-user",
+                            "chat_id": "doctor-channel",
+                        }
+                    }
+                },
+            }
+        }
+        mapped = evaluate_gateway_identity(
+            SimpleNamespace(
+                platform="slack",
+                user_id="doctor-user",
+                chat_id="doctor-channel",
+                thread_id="doctor-thread",
+                chat_type="dm",
+            ),
+            root_config=root_config,
+            audit_store=_ProbeAuditStore(),
+        )
+        unmapped = evaluate_gateway_identity(
+            SimpleNamespace(
+                platform="slack",
+                user_id="unknown-user",
+                chat_id="doctor-channel",
+                chat_type="dm",
+            ),
+            root_config=root_config,
+            audit_store=_ProbeAuditStore(),
+        )
+        if mapped.outcome is not DecisionOutcome.ALLOW or mapped.subject_id != "doctor-subject":
+            return _fail(
+                "gateway_identity",
+                "Gateway identity",
+                "mapped subject probe was not allowed",
+                "Repair enterprise.gateway_identity assignment matching.",
+            )
+        if unmapped.outcome is DecisionOutcome.ALLOW:
+            return _fail(
+                "gateway_identity",
+                "Gateway identity",
+                "unmapped subject probe was allowed",
+                "Repair enterprise.gateway_identity unmapped-user handling.",
+            )
+        return _pass("gateway_identity", "Gateway identity", "assignment and unmapped probes passed")
+    except Exception as exc:
+        return _fail(
+            "gateway_identity",
+            "Gateway identity",
+            str(exc),
+            "Repair enterprise.gateway_identity before enabling enterprise gateway mode.",
         )
 
 
