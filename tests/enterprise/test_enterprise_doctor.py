@@ -26,6 +26,7 @@ def test_enterprise_doctor_disabled_mode_is_machine_readable(tmp_path):
         "sandbox_profiles",
         "result_sanitizer",
         "provider_egress",
+        "memory_governance",
         "streaming_policy",
     }
 
