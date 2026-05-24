@@ -173,11 +173,37 @@ def run_codex_app_server_turn(
     }
 
 
+def _enterprise_enabled(agent) -> bool:
+    config = getattr(agent, "config", None)
+    if not isinstance(config, dict):
+        return False
+    enterprise = config.get("enterprise", {})
+    return isinstance(enterprise, dict) and bool(enterprise.get("enabled"))
+
+
 
 
 def run_codex_stream(agent, api_kwargs: dict, client: Any = None, on_first_delta: callable = None):
     """Execute one streaming Responses API request and return the final response."""
     import httpx as _httpx
+
+    try:
+        from enterprise.provider_egress import enforce_provider_streaming_policy
+
+        api_kwargs, _stream_decision = enforce_provider_streaming_policy(
+            api_kwargs,
+            route="codex_responses_stream",
+            root_config=getattr(agent, "config", None),
+        )
+        if _stream_decision.streaming_denied:
+            raise RuntimeError(
+                "Enterprise provider egress denied sensitive Codex streaming request."
+            )
+    except RuntimeError:
+        raise
+    except Exception:
+        if _enterprise_enabled(agent):
+            raise
 
     active_client = client or agent._ensure_primary_openai_client(reason="codex_stream_direct")
     max_stream_retries = 1
@@ -337,6 +363,23 @@ def run_codex_create_stream_fallback(agent, api_kwargs: dict, client: Any = None
     active_client = client or agent._ensure_primary_openai_client(reason="codex_create_stream_fallback")
     fallback_kwargs = dict(api_kwargs)
     fallback_kwargs["stream"] = True
+    try:
+        from enterprise.provider_egress import govern_provider_payload
+
+        fallback_kwargs, _stream_decision = govern_provider_payload(
+            fallback_kwargs,
+            root_config=getattr(agent, "config", None),
+            route="codex_responses_stream",
+        )
+        if _stream_decision.streaming_denied:
+            raise RuntimeError(
+                "Enterprise provider egress denied sensitive Codex streaming fallback request."
+            )
+    except RuntimeError:
+        raise
+    except Exception:
+        if _enterprise_enabled(agent):
+            raise
     fallback_kwargs = agent._get_transport().preflight_kwargs(fallback_kwargs, allow_stream=True)
     stream_or_response = active_client.responses.create(**fallback_kwargs)
 

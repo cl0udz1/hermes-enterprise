@@ -9,25 +9,30 @@ cannot be controlled any other way.
 
 ## Current Status
 
-Seven enterprise runtime authority patch points exist:
+Nine enterprise runtime authority patch points exist:
 
 1. MVP-0 Action Firewall v0 patches the Hermes tool execution preflight in
    `agent/tool_executor.py`.
 2. MVP-0 Tool-Result Sanitizer v0 patches the Hermes tool-result message helper
    in `agent/tool_dispatch_helpers.py`.
-3. MVP-1 Chat Completions Provider Egress Guard patches provider payload
-   assembly in `agent/transports/chat_completions.py`.
+3. MVP-1 Provider Egress Guard patches provider payload assembly in
+   `agent/transports/chat_completions.py`, `agent/transports/codex.py`,
+   `agent/transports/anthropic.py`, and `agent/transports/bedrock.py`.
 4. MVP-1 Memory Manager Governance Guard patches memory provider orchestration
    in `agent/memory_manager.py`.
 5. MVP-1 Plugin/MCP Admission Guard patches plugin import and plugin tool
    registration in `hermes_cli/plugins.py`.
 6. MVP-1 Plugin/MCP Admission Guard patches MCP server startup and MCP tool
    registration in `tools/mcp_tool.py`.
-7. Enterprise Doctor patches `hermes_cli/doctor.py` for diagnostics only.
+7. MVP-1 Provider Egress Guard patches auxiliary model-call kwargs in
+   `agent/auxiliary_client.py`.
+8. MVP-1 Provider Egress Guard patches sensitive streaming denial seams in
+   `agent/chat_completion_helpers.py` and `agent/codex_runtime.py`.
+9. Enterprise Doctor patches `hermes_cli/doctor.py` for diagnostics only.
 
 The patches are disabled by default through `enterprise.enabled: false`. They do
-not yet patch gateway identity, cron authority, access grants, or secret broker
-authority.
+not yet patch a real external vault/KMS, embeddings, or every direct provider
+client factory.
 
 Sandbox Enforcement v0 extends the existing enterprise action-firewall module
 without touching a new mature Hermes core runtime file.
@@ -208,7 +213,7 @@ Notes:
   DLP, semantic prompt-injection detection, provider egress control, or memory
   quarantine.
 
-### Patch: Chat Completions Provider Egress Guard
+### Patch: Provider Egress Guard
 
 Status: MVP-1 slice
 Owner: downstream enterprise fork
@@ -216,8 +221,10 @@ Date: 2026-05-23
 Upstream base: `4e4559f6e`
 
 Invariant:
-- In enterprise mode, Chat Completions provider request payloads must pass
-  through deterministic egress sanitization before provider submission.
+- In enterprise mode, covered provider request payloads must pass through
+  deterministic egress sanitization before provider submission.
+- Covered sensitive streaming requests must be explicitly denied instead of
+  streaming raw secret-bearing payloads.
 
 Why plugin/sidecar cannot enforce it:
 - A plugin cannot reliably see the final provider payload after Hermes applies
@@ -225,13 +232,23 @@ Why plugin/sidecar cannot enforce it:
   shaping, and extra_body assembly.
 
 Patch shape:
-- Add one transport-level call after both Chat Completions payload assembly
-  branches.
+- Add route-aware transport-level calls after Chat Completions, Codex
+  Responses, Anthropic Messages, and Bedrock Converse payload assembly.
+- Add auxiliary model-call kwargs governance before auxiliary
+  `chat.completions.create(...)` dispatch.
+- Add sensitive streaming denial checks before Chat Completions streaming and
+  Codex Responses streaming.
 - Keep all sanitizer logic in `enterprise/provider_egress.py`.
 - Reuse shared deterministic model-boundary sanitization.
 
 Files touched:
 - `agent/transports/chat_completions.py`
+- `agent/transports/codex.py`
+- `agent/transports/anthropic.py`
+- `agent/transports/bedrock.py`
+- `agent/auxiliary_client.py`
+- `agent/chat_completion_helpers.py`
+- `agent/codex_runtime.py`
 - `enterprise/provider_egress.py`
 - `enterprise/sanitization.py`
 - `enterprise/contracts.py`
@@ -247,6 +264,11 @@ Enterprise-off compatibility:
 Enterprise-on security gate:
 - `tests/enterprise/test_provider_egress.py::test_chat_completions_provider_egress_redacts_before_fake_provider`
 - `tests/enterprise/test_provider_egress.py::test_chat_completions_profile_path_uses_provider_egress`
+- `tests/enterprise/test_provider_egress.py::test_codex_responses_transport_redacts_before_provider`
+- `tests/enterprise/test_provider_egress.py::test_anthropic_messages_transport_redacts_before_provider`
+- `tests/enterprise/test_provider_egress.py::test_bedrock_converse_transport_redacts_before_provider`
+- `tests/enterprise/test_provider_egress.py::test_auxiliary_kwargs_are_governed_before_call`
+- `tests/enterprise/test_provider_egress.py::test_sensitive_streaming_payload_is_denied_by_policy`
 
 Rollback plan:
 - Set `enterprise.enabled: false` to preserve normal Hermes behavior.
@@ -255,11 +277,12 @@ Rollback plan:
   keep the enterprise module inert.
 
 Notes:
-- Streaming posture is `request_payload_only`: request payloads are sanitized
-  before Chat Completions streaming, but streamed provider responses are not
-  buffered or scanned in this slice.
-- This does not yet cover Codex Responses, Anthropic Messages, Bedrock,
-  auxiliary model calls, embeddings, or direct provider client factories.
+- Streaming posture is `deny_sensitive_streaming`: deterministic secret
+  findings on streaming payloads deny the stream request rather than claiming
+  response-stream scanning.
+- This does not yet cover embeddings, image-generation provider plugins, or
+  every direct provider client factory outside the main/auxiliary inference
+  path.
 
 ### Patch: Memory Manager Governance Guard
 

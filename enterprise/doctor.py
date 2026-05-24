@@ -302,7 +302,7 @@ def _check_result_sanitizer() -> EnterpriseDoctorCheck:
 
 def _check_provider_egress() -> EnterpriseDoctorCheck:
     try:
-        from enterprise.provider_egress import govern_provider_payload
+        from enterprise.provider_egress import COVERED_PROVIDER_EGRESS_ROUTES, govern_provider_payload
 
         class _ProbeAuditStore:
             def append_event(self, _event):
@@ -318,30 +318,34 @@ def _check_provider_egress() -> EnterpriseDoctorCheck:
                 }
             ],
         }
-        governed, decision = govern_provider_payload(
-            payload,
-            root_config={"enterprise": {"enabled": True}},
-            audit_store=_ProbeAuditStore(),
-        )
-        rendered = str(governed)
-        if probe_secret in rendered:
-            return _fail(
-                "provider_egress",
-                "Provider egress guard",
-                "secret probe was not redacted",
-                "Repair enterprise.provider_egress before enabling enterprise mode.",
+        decisions = []
+        for route in COVERED_PROVIDER_EGRESS_ROUTES:
+            governed, decision = govern_provider_payload(
+                payload,
+                root_config={"enterprise": {"enabled": True}},
+                audit_store=_ProbeAuditStore(),
+                route=route,
             )
-        if not decision.changed or not decision.findings:
-            return _fail(
-                "provider_egress",
-                "Provider egress guard",
-                "probe produced no provider-egress decision findings",
-                "Repair enterprise.provider_egress deterministic detectors.",
-            )
+            rendered = str(governed)
+            if probe_secret in rendered:
+                return _fail(
+                    "provider_egress",
+                    "Provider egress guard",
+                    f"secret probe was not redacted on route={route}",
+                    "Repair enterprise.provider_egress before enabling enterprise mode.",
+                )
+            if not decision.changed or not decision.findings:
+                return _fail(
+                    "provider_egress",
+                    "Provider egress guard",
+                    f"route={route} produced no provider-egress decision findings",
+                    "Repair enterprise.provider_egress deterministic detectors.",
+                )
+            decisions.append(decision)
         return _pass(
             "provider_egress",
             "Provider egress guard",
-            f"findings={len(decision.findings)}, streaming={decision.streaming_posture}",
+            f"routes={len(decisions)}, streaming={decisions[0].streaming_posture}",
         )
     except Exception as exc:
         return _fail(
@@ -992,6 +996,15 @@ def _check_streaming_policy(
     streaming_cfg = enterprise_cfg.get("streaming_policy", {})
     if isinstance(streaming_cfg, Mapping) and streaming_cfg.get("enabled") is True:
         return _pass("streaming_policy", "Streaming policy", "configured")
+    egress_cfg = enterprise_cfg.get("provider_egress", {})
+    if isinstance(egress_cfg, Mapping):
+        posture = str(egress_cfg.get("streaming_posture") or "")
+        if posture == "deny_sensitive_streaming":
+            return _pass(
+                "streaming_policy",
+                "Streaming policy",
+                "provider egress denies sensitive streaming payloads",
+            )
     if not mode.enabled:
         return _pass("streaming_policy", "Streaming policy", "not enforced while enterprise mode is disabled")
     return _edition_sensitive_missing(

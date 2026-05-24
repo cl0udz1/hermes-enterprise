@@ -4538,6 +4538,26 @@ def _build_call_kwargs(
     return kwargs
 
 
+def _govern_auxiliary_kwargs(
+    kwargs: dict,
+    *,
+    task: str | None = None,
+    root_config: Optional[Dict[str, Any]] = None,
+    audit_store: Any = None,
+) -> dict:
+    """Apply enterprise provider egress to auxiliary LLM payloads."""
+
+    from enterprise.provider_egress import govern_provider_payload
+
+    governed, _decision = govern_provider_payload(
+        kwargs,
+        root_config=root_config,
+        audit_store=audit_store,
+        route=f"auxiliary:{task or 'call'}",
+    )
+    return governed
+
+
 def _validate_llm_response(response: Any, task: str = None) -> Any:
     """Validate that an LLM response has the expected .choices[0].message shape.
 
@@ -4693,6 +4713,7 @@ def call_llm(
     _client_base = str(getattr(client, "base_url", "") or "")
     if _is_anthropic_compat_endpoint(resolved_provider, _client_base):
         kwargs["messages"] = _convert_openai_images_to_anthropic(kwargs["messages"])
+    kwargs = _govern_auxiliary_kwargs(kwargs, task=task)
 
     # Handle unsupported temperature, max_tokens vs max_completion_tokens retry,
     # then payment fallback.
@@ -5080,6 +5101,7 @@ async def async_call_llm(
     # Convert image blocks for Anthropic-compatible endpoints (e.g. MiniMax)
     if _is_anthropic_compat_endpoint(resolved_provider, _client_base):
         kwargs["messages"] = _convert_openai_images_to_anthropic(kwargs["messages"])
+    kwargs = _govern_auxiliary_kwargs(kwargs, task=task)
 
     try:
         return _validate_llm_response(

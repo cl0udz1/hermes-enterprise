@@ -193,7 +193,13 @@ class ResponsesApiTransport(ProviderTransport):
             merged_extra_body.setdefault("prompt_cache_key", session_id)
             kwargs["extra_body"] = merged_extra_body
 
-        return kwargs
+        from enterprise.provider_egress import govern_provider_kwargs
+
+        return govern_provider_kwargs(
+            kwargs,
+            route="codex_responses",
+            params=params,
+        )
 
     def normalize_response(self, response: Any, **kwargs) -> NormalizedResponse:
         """Normalize Codex Responses API response to NormalizedResponse."""

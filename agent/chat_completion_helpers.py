@@ -64,6 +64,14 @@ from utils import base_url_host_matches, base_url_hostname
 logger = logging.getLogger(__name__)
 
 
+def _enterprise_enabled(agent) -> bool:
+    config = getattr(agent, "config", None)
+    if not isinstance(config, dict):
+        return False
+    enterprise = config.get("enterprise", {})
+    return isinstance(enterprise, dict) and bool(enterprise.get("enabled"))
+
+
 def _ra():
     """Lazy ``run_agent`` reference.
 
@@ -254,6 +262,7 @@ def build_api_kwargs(agent, api_messages: list) -> dict:
             base_url=getattr(agent, "_anthropic_base_url", None),
             fast_mode=(agent.request_overrides or {}).get("speed") == "fast",
             drop_context_1m_beta=bool(getattr(agent, "_oauth_1m_beta_disabled", False)),
+            enterprise_root_config=getattr(agent, "config", None),
         )
 
     # AWS Bedrock native Converse API — bypasses the OpenAI client entirely.
@@ -269,6 +278,7 @@ def build_api_kwargs(agent, api_messages: list) -> dict:
             max_tokens=agent.max_tokens or 4096,
             region=region,
             guardrail_config=guardrail,
+            enterprise_root_config=getattr(agent, "config", None),
         )
 
     if agent.api_mode == "codex_responses":
@@ -320,6 +330,7 @@ def build_api_kwargs(agent, api_messages: list) -> dict:
             is_codex_backend=is_codex_backend,
             is_xai_responses=is_xai_responses,
             github_reasoning_extra=agent._github_models_reasoning_extra_body() if is_github_responses else None,
+            enterprise_root_config=getattr(agent, "config", None),
         )
 
     # ── chat_completions (default) ─────────────────────────────────────
@@ -424,6 +435,7 @@ def build_api_kwargs(agent, api_messages: list) -> dict:
             anthropic_max_output=_ant_max,
             supports_reasoning=agent._supports_reasoning_extra_body(),
             qwen_session_metadata=_qwen_meta,
+            enterprise_root_config=getattr(agent, "config", None),
         )
 
     # ── Legacy flag path ────────────────────────────────────────────
@@ -471,6 +483,7 @@ def build_api_kwargs(agent, api_messages: list) -> dict:
         lmstudio_reasoning_options=agent._lmstudio_reasoning_options_cached() if _is_lmstudio else None,
         anthropic_max_output=_ant_max,
         provider_name=agent.provider,
+        enterprise_root_config=getattr(agent, "config", None),
     )
 
 
@@ -1060,6 +1073,17 @@ def handle_max_iterations(agent, messages: list, api_call_count: int) -> str:
                 _summary_result = _tsum.normalize_response(summary_response, strip_tool_prefix=agent._is_anthropic_oauth)
                 final_response = (_summary_result.content or "").strip()
             else:
+                try:
+                    from enterprise.provider_egress import govern_provider_payload
+
+                    summary_kwargs, _summary_egress = govern_provider_payload(
+                        summary_kwargs,
+                        root_config=getattr(agent, "config", None),
+                        route="iteration_limit_summary",
+                    )
+                except Exception:
+                    if _enterprise_enabled(agent):
+                        raise
                 summary_response = agent._ensure_primary_openai_client(reason="iteration_limit_summary").chat.completions.create(**summary_kwargs)
                 _summary_result = agent._get_transport().normalize_response(summary_response)
                 final_response = (_summary_result.content or "").strip()
@@ -1103,6 +1127,17 @@ def handle_max_iterations(agent, messages: list, api_call_count: int) -> str:
                 if summary_extra_body:
                     summary_kwargs["extra_body"] = summary_extra_body
 
+                try:
+                    from enterprise.provider_egress import govern_provider_payload
+
+                    summary_kwargs, _summary_egress = govern_provider_payload(
+                        summary_kwargs,
+                        root_config=getattr(agent, "config", None),
+                        route="iteration_limit_summary_retry",
+                    )
+                except Exception:
+                    if _enterprise_enabled(agent):
+                        raise
                 summary_response = agent._ensure_primary_openai_client(reason="iteration_limit_summary_retry").chat.completions.create(**summary_kwargs)
                 _retry_result = agent._get_transport().normalize_response(summary_response)
                 final_response = (_retry_result.content or "").strip()
@@ -1313,6 +1348,23 @@ def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=
                 pool=_conn_cap,
             ),
         }
+        try:
+            from enterprise.provider_egress import govern_provider_payload
+
+            stream_kwargs, _stream_decision = govern_provider_payload(
+                stream_kwargs,
+                root_config=getattr(agent, "config", None),
+                route="chat_completions_stream",
+            )
+            if _stream_decision.streaming_denied:
+                raise RuntimeError(
+                    "Enterprise provider egress denied sensitive streaming request."
+                )
+        except RuntimeError:
+            raise
+        except Exception:
+            if _enterprise_enabled(agent):
+                raise
         request_client_holder["client"] = agent._create_request_openai_client(
             reason="chat_completion_stream_request",
             api_kwargs=stream_kwargs,

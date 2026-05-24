@@ -62,7 +62,7 @@ class AnthropicTransport(ProviderTransport):
         """
         from agent.anthropic_adapter import build_anthropic_kwargs
 
-        return build_anthropic_kwargs(
+        api_kwargs = build_anthropic_kwargs(
             model=model,
             messages=messages,
             tools=tools,
@@ -75,6 +75,13 @@ class AnthropicTransport(ProviderTransport):
             base_url=params.get("base_url"),
             fast_mode=params.get("fast_mode", False),
             drop_context_1m_beta=params.get("drop_context_1m_beta", False),
+        )
+        from enterprise.provider_egress import govern_provider_kwargs
+
+        return govern_provider_kwargs(
+            api_kwargs,
+            route="anthropic_messages",
+            params=params,
         )
 
     def normalize_response(self, response: Any, **kwargs) -> NormalizedResponse:
