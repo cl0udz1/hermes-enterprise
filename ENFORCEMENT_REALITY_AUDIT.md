@@ -86,7 +86,7 @@ surfaces:
 | Tool execution | Hermes owns model-proposed tool execution. | Add action firewall at the strongest runtime seam. |
 | Tool results | Hermes feeds tool outputs back into model context. | Add result sanitizer and context labeling. |
 | Provider egress | Chat Completions provider payloads pass through the enterprise provider-egress guard when enterprise mode is enabled. | Extend coverage to remaining provider transports, auxiliary calls, embeddings, direct client factories, and streamed provider responses. |
-| Memory | Hermes stores and retrieves durable context. | Add memory proposal/quarantine gates. |
+| Memory | Memory Manager payloads pass through the enterprise memory-governance guard when enterprise mode is enabled. | Extend to tenant-scoped memory isolation, provider-specific recall ACLs, semantic classification, and durable quarantine workflow. |
 | Plugins | Hermes can load third-party tools/hooks. | Add manifest and trust admission. |
 | Gateway | Hermes exposes messaging/platform authority. | Add identity binding and assignment policy. |
 | Cron | Hermes can run scheduled work. | Add owner, intent, expiry, and policy wrapper. |
@@ -102,7 +102,9 @@ surfaces:
 | `agent/tool_executor.py` | Add lazy enterprise preflight before sequential and concurrent tool execution. | Blocks covered tool calls before execution when enterprise mode is enabled. |
 | `agent/tool_dispatch_helpers.py` | Route tool-result message construction through the enterprise result sanitizer. | Sanitizes covered tool output before model-visible context when enterprise mode is enabled. |
 | `agent/transports/chat_completions.py` | Route OpenAI-compatible provider request payloads through the enterprise provider-egress guard. | Sanitizes Chat Completions provider payloads before provider submission when enterprise mode is enabled. |
+| `agent/memory_manager.py` | Route memory write/read payloads through the enterprise memory-governance guard. | Sanitizes governed memory provider inputs and recalled memory outputs when enterprise mode is enabled. |
 | `enterprise/provider_egress.py` | Define deterministic provider request egress governance and audit emission. | Enforces the Chat Completions provider payload boundary when called by the transport. |
+| `enterprise/memory_governance.py` | Define deterministic memory payload governance and audit emission. | Enforces memory payload boundaries when called by Memory Manager. |
 | `enterprise/sanitization.py` | Share deterministic secret and prompt-control sanitizers across result and provider boundaries. | No direct authority until called by a runtime boundary. |
 | `enterprise/firewall/action.py` | Feed observed sandbox side effects into triage, apply developer local fast path, and emit sandbox/staging audit events. | Enforces manifest/profile mismatch checks and audited local fast-path decisions inside the existing action firewall path. |
 | `enterprise/sandbox/*` | Define sandbox profiles and v0 observed-intent enforcement. | No direct runtime authority until called by the action firewall. |
@@ -129,8 +131,8 @@ These are not real yet:
    provider responses.
 4. Secret broker.
 5. Access Broker.
-6. Provider/memory/runtime integration with the Artifact Vault and Context
-   Hydration Boundary.
+6. Provider/runtime integration with the Artifact Vault and Context Hydration
+   Boundary, plus deeper memory integration with artifact-backed quarantine.
 7. Durable encrypted artifact storage and tenant-scoped artifact isolation.
 8. Managed agent fleet controller.
 9. Agent Builder.
@@ -324,7 +326,8 @@ Enterprise Doctor v0 evidence:
    renders the Enterprise Security section in `hermes doctor`.
 4. Critical checks: enterprise mode config, audit store, action firewall hook,
    capability manifest loading, triage latency config, sandbox profile coverage,
-   result sanitizer, provider egress guard, and streaming policy readiness.
+   result sanitizer, provider egress guard, memory governance, and streaming
+   policy readiness.
 5. Fail-closed posture: missing critical controls fail in team, enterprise, or
    regulated mode; Developer Secure can warn for incomplete future controls.
 6. Tests:
@@ -410,3 +413,33 @@ MVP-1 Provider Egress v0 evidence:
 8. Verification:
    `python scripts\enterprise_mvp0_gate.py` passed locally with 74 enterprise
    tests and 15 targeted Hermes authority-seam tests after this slice.
+
+MVP-1 Memory Governance v0 evidence:
+
+1. Enforcement point: `agent/memory_manager.py`, the common orchestrator for
+   memory provider prefetch, queueing, sync, session-end extraction,
+   pre-compression extraction, explicit memory-write mirroring, provider tool
+   calls/results, and delegation observations.
+2. Enterprise module: `enterprise/memory_governance.py` recursively sanitizes
+   memory-bound payload strings and emits `memory_governance_sanitized` audit
+   events only when the payload changes.
+3. Enterprise-off gates:
+   `tests/enterprise/test_memory_governance.py::test_memory_governance_disabled_returns_payload_unchanged`
+   and
+   `tests/enterprise/test_memory_governance.py::test_memory_manager_disabled_preserves_provider_payloads`
+   prove disabled enterprise mode preserves payloads and does not audit.
+4. Enterprise-on gates:
+   `tests/enterprise/test_memory_governance.py::test_memory_manager_redacts_session_end_sync_and_recall_payloads`
+   and
+   `tests/enterprise/test_memory_governance.py::test_memory_manager_redacts_explicit_writes_tools_and_pre_compress`
+   prove fake secrets do not reach fake memory provider payloads or recalled
+   model-visible memory text on governed paths.
+5. Upstream compatibility gate:
+   `tests/agent/test_memory_provider.py` passed after the Memory Manager patch.
+6. Doctor evidence:
+   `tests/enterprise/test_enterprise_doctor.py` includes the
+   `memory_governance` diagnostic check.
+7. Explicit limitation: this is a deterministic redaction boundary. It does
+   not yet provide tenant memory isolation, provider-specific recall ACLs,
+   semantic classification, durable quarantine review, or memory deletion
+   enforcement across third-party providers.

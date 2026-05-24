@@ -67,3 +67,20 @@ The first implementation slice is the Chat Completions provider-egress guard:
 5. Streaming posture is `request_payload_only`: prompt/request payloads are
    sanitized before Chat Completions streaming is enabled, but streamed provider
    responses are not buffered or scanned in this slice.
+
+## Second MVP-1 Slice
+
+The second implementation slice is Memory Manager governance:
+
+1. `agent/memory_manager.py` applies the enterprise memory-governance guard to
+   prefetch queries, recall results, queued prefetches, completed-turn sync,
+   session-end extraction, pre-compression extraction, explicit memory writes,
+   memory-provider tool calls/results, and delegation observations.
+2. `enterprise/memory_governance.py` recursively sanitizes memory-bound payloads
+   with deterministic secret and prompt-control detectors.
+3. Enterprise-off mode returns memory payloads unchanged and does not audit.
+4. Enterprise-on mode emits a local audit event only when a memory-bound payload
+   changes.
+5. This is a redaction boundary, not full tenant-scoped memory isolation,
+   provider-specific ACLs, durable quarantine workflow, or semantic memory
+   classification.

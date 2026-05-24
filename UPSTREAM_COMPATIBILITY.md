@@ -319,6 +319,21 @@ enterprise compile check passed
 Enterprise MVP-0 gate passed.
 ```
 
+Current branch verification after the MVP-1 memory-governance slice:
+
+```text
+python scripts\enterprise_mvp0_gate.py
+```
+
+Result:
+
+```text
+enterprise compile check passed
+78 enterprise tests passed
+15 targeted Hermes authority-seam tests passed
+Enterprise MVP-0 gate passed.
+```
+
 Additional environment note:
 
 ```text
@@ -391,14 +406,19 @@ The current runtime patches are intentionally small:
     Chat Completions payload assembly. The implementation lives in
     `enterprise/provider_egress.py`, and enterprise mode remains disabled by
     default.
+12. The MVP-1 memory-governance slice adds one runtime patch in
+    `agent/memory_manager.py`, at the common memory provider orchestration
+    seam. The implementation lives in `enterprise/memory_governance.py`, and
+    enterprise mode remains disabled by default.
 
 Enterprise mode remains disabled by default, and focused tests cover
 enterprise-off behavior plus existing tool-loop guardrail behavior.
 
 The next meaningful compatibility risks appear when wiring hydration into
 provider or memory paths, expanding provider egress beyond Chat Completions,
-adding approved staged execution, memory gates, plugin admission, gateway
-identity, cron authority, or team/admin fast-path assignment management. The
-Enterprise Doctor v0 patch is lower runtime risk because it only reads
-diagnostic state and reports issues; the release-gate regression and
-closure-gate slices add no runtime authority.
+adding approved staged execution, tenant-scoped memory isolation,
+provider-specific memory ACLs, plugin admission, gateway identity, cron
+authority, or team/admin fast-path assignment management. The Enterprise
+Doctor v0 patch is lower runtime risk because it only reads diagnostic state
+and reports issues; the release-gate regression and closure-gate slices add no
+runtime authority.

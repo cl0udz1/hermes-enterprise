@@ -248,10 +248,30 @@ class MemoryManager:
     provider is allowed.  Failures in one provider never block the other.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        enterprise_root_config: Optional[Dict[str, Any]] = None,
+        enterprise_audit_store: Any = None,
+    ) -> None:
         self._providers: List[MemoryProvider] = []
         self._tool_to_provider: Dict[str, MemoryProvider] = {}
         self._has_external: bool = False  # True once a non-builtin provider is added
+        self._enterprise_root_config = enterprise_root_config
+        self._enterprise_audit_store = enterprise_audit_store
+
+    def _govern_memory_payload(self, payload: Any, *, route: str) -> Any:
+        """Apply downstream enterprise memory governance."""
+
+        from enterprise.memory_governance import govern_memory_payload
+
+        governed_payload, _decision = govern_memory_payload(
+            payload,
+            root_config=self._enterprise_root_config,
+            audit_store=self._enterprise_audit_store,
+            route=route,
+        )
+        return governed_payload
 
     # -- Registration --------------------------------------------------------
 
@@ -326,7 +346,12 @@ class MemoryManager:
             try:
                 block = provider.system_prompt_block()
                 if block and block.strip():
-                    blocks.append(block)
+                    governed_block = self._govern_memory_payload(
+                        block,
+                        route="system_prompt_block",
+                    )
+                    if governed_block and str(governed_block).strip():
+                        blocks.append(str(governed_block))
             except Exception as e:
                 logger.warning(
                     "Memory provider '%s' system_prompt_block() failed: %s",
@@ -342,12 +367,20 @@ class MemoryManager:
         Returns merged context text labeled by provider. Empty providers
         are skipped. Failures in one provider don't block others.
         """
+        if not self._providers:
+            return ""
         parts = []
+        governed_query = self._govern_memory_payload(query, route="prefetch_query")
         for provider in self._providers:
             try:
-                result = provider.prefetch(query, session_id=session_id)
+                result = provider.prefetch(str(governed_query), session_id=session_id)
                 if result and result.strip():
-                    parts.append(result)
+                    governed_result = self._govern_memory_payload(
+                        result,
+                        route="prefetch_result",
+                    )
+                    if governed_result and str(governed_result).strip():
+                        parts.append(str(governed_result))
             except Exception as e:
                 logger.debug(
                     "Memory provider '%s' prefetch failed (non-fatal): %s",
@@ -357,9 +390,12 @@ class MemoryManager:
 
     def queue_prefetch_all(self, query: str, *, session_id: str = "") -> None:
         """Queue background prefetch on all providers for the next turn."""
+        if not self._providers:
+            return
+        governed_query = self._govern_memory_payload(query, route="queue_prefetch_query")
         for provider in self._providers:
             try:
-                provider.queue_prefetch(query, session_id=session_id)
+                provider.queue_prefetch(str(governed_query), session_id=session_id)
             except Exception as e:
                 logger.debug(
                     "Memory provider '%s' queue_prefetch failed (non-fatal): %s",
@@ -370,6 +406,18 @@ class MemoryManager:
 
     def sync_all(self, user_content: str, assistant_content: str, *, session_id: str = "") -> None:
         """Sync a completed turn to all providers."""
+        if not self._providers:
+            return
+        governed_turn = self._govern_memory_payload(
+            {
+                "user_content": user_content,
+                "assistant_content": assistant_content,
+            },
+            route="sync_turn",
+        )
+        if isinstance(governed_turn, dict):
+            user_content = str(governed_turn.get("user_content", ""))
+            assistant_content = str(governed_turn.get("assistant_content", ""))
         for provider in self._providers:
             try:
                 provider.sync_turn(user_content, assistant_content, session_id=session_id)
@@ -419,7 +467,18 @@ class MemoryManager:
         if provider is None:
             return tool_error(f"No memory provider handles tool '{tool_name}'")
         try:
-            return provider.handle_tool_call(tool_name, args, **kwargs)
+            governed_args = self._govern_memory_payload(
+                args,
+                route=f"tool_call_args:{tool_name}",
+            )
+            if not isinstance(governed_args, dict):
+                governed_args = {}
+            result = provider.handle_tool_call(tool_name, governed_args, **kwargs)
+            governed_result = self._govern_memory_payload(
+                result,
+                route=f"tool_result:{tool_name}",
+            )
+            return str(governed_result)
         except Exception as e:
             logger.error(
                 "Memory provider '%s' handle_tool_call(%s) failed: %s",
@@ -445,9 +504,17 @@ class MemoryManager:
 
     def on_session_end(self, messages: List[Dict[str, Any]]) -> None:
         """Notify all providers of session end."""
+        if not self._providers:
+            return
+        governed_messages = self._govern_memory_payload(
+            messages,
+            route="session_end_messages",
+        )
+        if not isinstance(governed_messages, list):
+            governed_messages = []
         for provider in self._providers:
             try:
-                provider.on_session_end(messages)
+                provider.on_session_end(governed_messages)
             except Exception as e:
                 logger.debug(
                     "Memory provider '%s' on_session_end failed: %s",
@@ -495,12 +562,25 @@ class MemoryManager:
         Returns combined text from providers to include in the compression
         summary prompt. Empty string if no provider contributes.
         """
+        if not self._providers:
+            return ""
         parts = []
+        governed_messages = self._govern_memory_payload(
+            messages,
+            route="pre_compress_messages",
+        )
+        if not isinstance(governed_messages, list):
+            governed_messages = []
         for provider in self._providers:
             try:
-                result = provider.on_pre_compress(messages)
+                result = provider.on_pre_compress(governed_messages)
                 if result and result.strip():
-                    parts.append(result)
+                    governed_result = self._govern_memory_payload(
+                        result,
+                        route="pre_compress_result",
+                    )
+                    if governed_result and str(governed_result).strip():
+                        parts.append(str(governed_result))
             except Exception as e:
                 logger.debug(
                     "Memory provider '%s' on_pre_compress failed: %s",
@@ -545,6 +625,19 @@ class MemoryManager:
 
         Skips the builtin provider itself (it's the source of the write).
         """
+        if not any(provider.name != "builtin" for provider in self._providers):
+            return
+        governed_write = self._govern_memory_payload(
+            {
+                "content": content,
+                "metadata": dict(metadata or {}),
+            },
+            route="memory_write",
+        )
+        if isinstance(governed_write, dict):
+            content = str(governed_write.get("content", ""))
+            governed_metadata = governed_write.get("metadata", {})
+            metadata = governed_metadata if isinstance(governed_metadata, dict) else {}
         for provider in self._providers:
             if provider.name == "builtin":
                 continue
@@ -567,6 +660,21 @@ class MemoryManager:
     def on_delegation(self, task: str, result: str, *,
                       child_session_id: str = "", **kwargs) -> None:
         """Notify all providers that a subagent completed."""
+        if not self._providers:
+            return
+        governed_delegation = self._govern_memory_payload(
+            {
+                "task": task,
+                "result": result,
+                "kwargs": dict(kwargs),
+            },
+            route="delegation",
+        )
+        if isinstance(governed_delegation, dict):
+            task = str(governed_delegation.get("task", ""))
+            result = str(governed_delegation.get("result", ""))
+            governed_kwargs = governed_delegation.get("kwargs", {})
+            kwargs = governed_kwargs if isinstance(governed_kwargs, dict) else {}
         for provider in self._providers:
             try:
                 provider.on_delegation(

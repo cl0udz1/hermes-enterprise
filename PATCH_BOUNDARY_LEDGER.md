@@ -251,6 +251,58 @@ Notes:
 - This does not yet cover Codex Responses, Anthropic Messages, Bedrock,
   auxiliary model calls, embeddings, or direct provider client factories.
 
+### Patch: Memory Manager Governance Guard
+
+Status: MVP-1 slice
+Owner: downstream enterprise fork
+Date: 2026-05-24
+Upstream base: `de17aea39`
+
+Invariant:
+- In enterprise mode, memory provider payloads must pass through deterministic
+  governance before becoming durable memory, recall context, compression input,
+  explicit memory-write mirrors, memory-provider tool inputs/results, or
+  delegation observations.
+
+Why plugin/sidecar cannot enforce it:
+- Memory providers sit behind `MemoryManager`; a plugin cannot reliably govern
+  every provider input/output after Hermes has selected providers, routed tool
+  calls, queued prefetches, and prepared session-end extraction payloads.
+
+Patch shape:
+- Add one enterprise governance helper inside `MemoryManager`.
+- Call it at the manager-level memory seams instead of patching individual
+  memory providers.
+- Keep sanitizer and audit logic inside `enterprise/memory_governance.py`.
+
+Files touched:
+- `agent/memory_manager.py`
+- `enterprise/memory_governance.py`
+- `enterprise/contracts.py`
+- `enterprise/config.py`
+- `enterprise/doctor.py`
+- `tests/enterprise/test_memory_governance.py`
+- `tests/enterprise/test_enterprise_doctor.py`
+
+Enterprise-off compatibility:
+- `tests/enterprise/test_memory_governance.py::test_memory_governance_disabled_returns_payload_unchanged`
+- `tests/enterprise/test_memory_governance.py::test_memory_manager_disabled_preserves_provider_payloads`
+- `tests/agent/test_memory_provider.py`
+
+Enterprise-on security gate:
+- `tests/enterprise/test_memory_governance.py::test_memory_manager_redacts_session_end_sync_and_recall_payloads`
+- `tests/enterprise/test_memory_governance.py::test_memory_manager_redacts_explicit_writes_tools_and_pre_compress`
+
+Rollback plan:
+- Set `enterprise.enabled: false` to preserve normal Hermes behavior.
+- If the patch itself must be removed, delete the `_govern_memory_payload(...)`
+  calls in `MemoryManager` and keep the enterprise module inert.
+
+Notes:
+- This is a redaction boundary, not tenant-scoped memory isolation, semantic
+  memory classification, durable quarantine review, provider-specific recall
+  ACLs, or cross-provider deletion enforcement.
+
 ## Entry Template
 
 ```markdown
