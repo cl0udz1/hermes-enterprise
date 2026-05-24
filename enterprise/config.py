@@ -110,6 +110,14 @@ DEFAULT_ENTERPRISE_CONFIG: dict[str, Any] = {
         "policy_version": "local",
         "audit_all_decisions": True,
     },
+    "secret_broker": {
+        "enabled": True,
+        "provider": "fake",
+        "default_credential_ttl_minutes": 5,
+        "max_credential_ttl_minutes": 60,
+        "require_access_grant": True,
+        "audit_all_decisions": True,
+    },
     "sandbox": {
         "enforce_manifests": True,
     },

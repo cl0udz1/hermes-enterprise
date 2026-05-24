@@ -79,6 +79,7 @@ def run_enterprise_doctor(
         _check_gateway_identity(mode, enterprise_cfg),
         _check_cron_governance(mode, enterprise_cfg),
         _check_access_broker(mode, enterprise_cfg),
+        _check_secret_broker(mode, enterprise_cfg),
         _check_streaming_policy(mode, enterprise_cfg),
     ]
     return EnterpriseDoctorReport(
@@ -848,6 +849,139 @@ def _check_access_broker(
             "Access broker",
             str(exc),
             "Repair enterprise.access_broker before enabling approval lifecycle mode.",
+        )
+
+
+def _check_secret_broker(
+    mode: EnterpriseMode,
+    enterprise_cfg: Mapping[str, Any],
+) -> EnterpriseDoctorCheck:
+    secret_cfg = enterprise_cfg.get("secret_broker", {})
+    if not isinstance(secret_cfg, Mapping):
+        return _fail(
+            "secret_broker",
+            "Secret broker",
+            "enterprise.secret_broker must be a mapping",
+            "Restore enterprise.secret_broker to a mapping with fake-provider TTL settings.",
+        )
+    if not mode.enabled:
+        return _pass("secret_broker", "Secret broker", "not enforced while enterprise mode is disabled")
+    if not bool(secret_cfg.get("enabled", True)):
+        return _edition_sensitive_missing(
+            mode,
+            "secret_broker",
+            "Secret broker",
+            "short-lived credential broker is disabled",
+            "Enable enterprise.secret_broker before team rollout.",
+        )
+    if str(secret_cfg.get("provider") or "fake") != "fake":
+        return _fail(
+            "secret_broker",
+            "Secret broker",
+            f"unsupported MVP-1 provider: {secret_cfg.get('provider')}",
+            "Keep enterprise.secret_broker.provider=fake until a real vault/KMS adapter lands.",
+        )
+    try:
+        from datetime import datetime, timedelta, timezone
+
+        from enterprise.audit import AuditStore
+        from enterprise.contracts import AccessGrant
+        from enterprise.firewall.result import sanitize_tool_result
+        from enterprise.provider_egress import govern_provider_payload
+        from enterprise.secrets import (
+            SECRET_ISSUE_ACTION,
+            FakeSecretBroker,
+            SecretAccessDenied,
+            build_secret_access_request,
+            credential_reference,
+            secret_resource,
+        )
+
+        with tempfile.TemporaryDirectory(prefix="hermes-enterprise-secret-doctor-") as tmp:
+            audit = AuditStore(Path(tmp) / "audit.sqlite3")
+            fake_secret = "sk-proj-abcdefghijklmnopqrstuvwxyz1234567890"
+            broker = FakeSecretBroker({"OPENAI_API_KEY": fake_secret}, audit_store=audit)
+            request = build_secret_access_request(
+                subject_id="doctor-subject",
+                secret_name="OPENAI_API_KEY",
+                purpose="doctor probe",
+                scope=["provider:openai"],
+                action_hash="doctor-secret-action",
+            )
+            denied_without_grant = False
+            try:
+                broker.issue_credential(request, grant=None)
+            except SecretAccessDenied:
+                denied_without_grant = True
+            grant = AccessGrant(
+                grant_id="doctor-secret-grant",
+                request_id=request.request_id,
+                subject_id=request.subject_id,
+                resource=secret_resource(request.secret_name),
+                actions=[SECRET_ISSUE_ACTION],
+                expires_at=(datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat(),
+                policy_version="doctor-policy",
+                approved_by="doctor-approver",
+            )
+            credential = broker.issue_credential(
+                request,
+                grant=grant,
+                ttl_minutes=int(secret_cfg.get("default_credential_ttl_minutes", 5)),
+                max_ttl_minutes=int(secret_cfg.get("max_credential_ttl_minutes", 60)),
+            )
+            reference = credential_reference(credential)
+            result = sanitize_tool_result(
+                "secret_lookup",
+                {"credential": reference, "raw_secret": fake_secret},
+                root_config={"enterprise": {"enabled": True}},
+                audit_store=audit,
+            )
+            provider_payload, provider_decision = govern_provider_payload(
+                {
+                    "model": "gpt-test",
+                    "messages": [{"role": "user", "content": f"raw leak attempt {fake_secret}"}],
+                },
+                root_config={"enterprise": {"enabled": True}},
+                audit_store=audit,
+                route="secret_broker",
+            )
+            rendered = str(
+                {
+                    "credential": credential.to_dict(),
+                    "reference": reference,
+                    "tool_result": result.content,
+                    "provider_payload": provider_payload,
+                    "audit": [event.to_dict() for event in audit.list_events()],
+                }
+            )
+            if not denied_without_grant:
+                return _fail(
+                    "secret_broker",
+                    "Secret broker",
+                    "secret credential was issued without an access grant",
+                    "Require access-broker grants before fake secret issuance.",
+                )
+            if fake_secret in rendered:
+                return _fail(
+                    "secret_broker",
+                    "Secret broker",
+                    "raw secret reached credential, audit, tool-result, or provider boundary",
+                    "Keep broker output opaque and route raw secret material through governed sanitizers.",
+                )
+            if not result.changed or not provider_decision.changed:
+                return _fail(
+                    "secret_broker",
+                    "Secret broker",
+                    "boundary sanitizers did not redact a raw-secret leak probe",
+                    "Repair result/provider sanitizers before enabling secret broker issuance.",
+                )
+        return _pass("secret_broker", "Secret broker", "fake grant-gated issuance and no-raw-boundary probes passed")
+    except Exception as exc:
+        return _fail(
+            "secret_broker",
+            "Secret broker",
+            str(exc),
+            "Repair enterprise.secret_broker before enabling short-lived credential mode.",
         )
 
 
