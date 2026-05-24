@@ -198,6 +198,59 @@ Notes:
   DLP, semantic prompt-injection detection, provider egress control, or memory
   quarantine.
 
+### Patch: Chat Completions Provider Egress Guard
+
+Status: MVP-1 slice
+Owner: downstream enterprise fork
+Date: 2026-05-23
+Upstream base: `4e4559f6e`
+
+Invariant:
+- In enterprise mode, Chat Completions provider request payloads must pass
+  through deterministic egress sanitization before provider submission.
+
+Why plugin/sidecar cannot enforce it:
+- A plugin cannot reliably see the final provider payload after Hermes applies
+  provider-profile quirks, request overrides, role rewrites, tool schema
+  shaping, and extra_body assembly.
+
+Patch shape:
+- Add one transport-level call after both Chat Completions payload assembly
+  branches.
+- Keep all sanitizer logic in `enterprise/provider_egress.py`.
+- Reuse shared deterministic model-boundary sanitization.
+
+Files touched:
+- `agent/transports/chat_completions.py`
+- `enterprise/provider_egress.py`
+- `enterprise/sanitization.py`
+- `enterprise/contracts.py`
+- `enterprise/config.py`
+- `enterprise/doctor.py`
+- `tests/enterprise/test_provider_egress.py`
+- `tests/enterprise/test_enterprise_doctor.py`
+
+Enterprise-off compatibility:
+- `tests/enterprise/test_provider_egress.py::test_provider_egress_disabled_returns_payload_unchanged`
+- `tests/enterprise/test_provider_egress.py::test_chat_completions_provider_egress_disabled_preserves_transport_payload`
+
+Enterprise-on security gate:
+- `tests/enterprise/test_provider_egress.py::test_chat_completions_provider_egress_redacts_before_fake_provider`
+- `tests/enterprise/test_provider_egress.py::test_chat_completions_profile_path_uses_provider_egress`
+
+Rollback plan:
+- Set `enterprise.enabled: false` to preserve normal Hermes behavior.
+- If the patch itself must be removed, delete the call to
+  `_apply_enterprise_provider_egress(...)` in `ChatCompletionsTransport` and
+  keep the enterprise module inert.
+
+Notes:
+- Streaming posture is `request_payload_only`: request payloads are sanitized
+  before Chat Completions streaming, but streamed provider responses are not
+  buffered or scanned in this slice.
+- This does not yet cover Codex Responses, Anthropic Messages, Bedrock,
+  auxiliary model calls, embeddings, or direct provider client factories.
+
 ## Entry Template
 
 ```markdown

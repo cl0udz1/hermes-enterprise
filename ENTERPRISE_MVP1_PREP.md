@@ -1,7 +1,7 @@
 # Enterprise MVP-1 Prep
 
-This note prepares the repository for MVP-1 without starting MVP-1 runtime
-work yet.
+This note prepares the repository for MVP-1 and records the first runtime slice
+once it starts.
 
 ## GitHub Operating Model
 
@@ -52,3 +52,18 @@ The first MVP-1 PR should still be small:
 2. Do not wrap every provider path yet.
 3. Prove synthetic secrets do not reach a fake non-streaming provider payload.
 4. Document streaming as blocked, buffered, or not yet supported.
+
+## First MVP-1 Slice
+
+The first implementation slice is the Chat Completions provider-egress guard:
+
+1. `agent/transports/chat_completions.py` applies the enterprise provider egress
+   guard after both provider-profile and legacy payload assembly.
+2. `enterprise/provider_egress.py` recursively sanitizes outbound provider
+   payload strings with deterministic secret and prompt-control detectors.
+3. Enterprise-off mode returns the original provider payload unchanged.
+4. Enterprise-on mode emits a local audit event only when the provider payload
+   changes.
+5. Streaming posture is `request_payload_only`: prompt/request payloads are
+   sanitized before Chat Completions streaming is enabled, but streamed provider
+   responses are not buffered or scanned in this slice.

@@ -85,7 +85,7 @@ surfaces:
 |---|---|---|
 | Tool execution | Hermes owns model-proposed tool execution. | Add action firewall at the strongest runtime seam. |
 | Tool results | Hermes feeds tool outputs back into model context. | Add result sanitizer and context labeling. |
-| Provider egress | Hermes sends prompts/context to providers. | Add provider egress policy in later slice. |
+| Provider egress | Chat Completions provider payloads pass through the enterprise provider-egress guard when enterprise mode is enabled. | Extend coverage to remaining provider transports, auxiliary calls, embeddings, direct client factories, and streamed provider responses. |
 | Memory | Hermes stores and retrieves durable context. | Add memory proposal/quarantine gates. |
 | Plugins | Hermes can load third-party tools/hooks. | Add manifest and trust admission. |
 | Gateway | Hermes exposes messaging/platform authority. | Add identity binding and assignment policy. |
@@ -101,6 +101,9 @@ surfaces:
 | `enterprise/manifests/core_tools.yaml` | Define initial risk metadata for covered high-risk tool families. | None; metadata is not enforced yet. |
 | `agent/tool_executor.py` | Add lazy enterprise preflight before sequential and concurrent tool execution. | Blocks covered tool calls before execution when enterprise mode is enabled. |
 | `agent/tool_dispatch_helpers.py` | Route tool-result message construction through the enterprise result sanitizer. | Sanitizes covered tool output before model-visible context when enterprise mode is enabled. |
+| `agent/transports/chat_completions.py` | Route OpenAI-compatible provider request payloads through the enterprise provider-egress guard. | Sanitizes Chat Completions provider payloads before provider submission when enterprise mode is enabled. |
+| `enterprise/provider_egress.py` | Define deterministic provider request egress governance and audit emission. | Enforces the Chat Completions provider payload boundary when called by the transport. |
+| `enterprise/sanitization.py` | Share deterministic secret and prompt-control sanitizers across result and provider boundaries. | No direct authority until called by a runtime boundary. |
 | `enterprise/firewall/action.py` | Feed observed sandbox side effects into triage, apply developer local fast path, and emit sandbox/staging audit events. | Enforces manifest/profile mismatch checks and audited local fast-path decisions inside the existing action firewall path. |
 | `enterprise/sandbox/*` | Define sandbox profiles and v0 observed-intent enforcement. | No direct runtime authority until called by the action firewall. |
 | `enterprise/staging/*` | Store staged approval records and redacted previews for covered side-effecting actions. | No direct runtime authority until called by the action firewall. |
@@ -121,7 +124,9 @@ These are not real yet:
 1. Approval queue, approval UI/API, and approved execution workflow for staged
    Action Firewall decisions.
 2. Agentic WAF.
-3. Provider egress gateway.
+3. Provider egress coverage for Codex Responses, Anthropic Messages, Bedrock,
+   auxiliary calls, embeddings, direct client factories, and all streamed
+   provider responses.
 4. Secret broker.
 5. Access Broker.
 6. Provider/memory/runtime integration with the Artifact Vault and Context
@@ -319,7 +324,7 @@ Enterprise Doctor v0 evidence:
    renders the Enterprise Security section in `hermes doctor`.
 4. Critical checks: enterprise mode config, audit store, action firewall hook,
    capability manifest loading, triage latency config, sandbox profile coverage,
-   result sanitizer, and streaming policy readiness.
+   result sanitizer, provider egress guard, and streaming policy readiness.
 5. Fail-closed posture: missing critical controls fail in team, enterprise, or
    regulated mode; Developer Secure can warn for incomplete future controls.
 6. Tests:
@@ -328,8 +333,8 @@ Enterprise Doctor v0 evidence:
    and
    `tests/enterprise/test_enterprise_doctor.py::test_hermes_cli_renders_enterprise_doctor_section`.
 7. Explicit limitation: Doctor does not replace enforcement, SIEM export,
-   tamper-evident storage, provider egress policy, or admin dashboard health
-   management.
+   tamper-evident storage, all-provider egress coverage, or admin dashboard
+   health management.
 
 MVP-0 Release-Gate Regression Suite evidence:
 
@@ -373,3 +378,35 @@ MVP-0 Closure Gate evidence:
 5. Verification:
    `python scripts\enterprise_mvp0_gate.py` passed locally with 70 enterprise
    tests and 15 targeted Hermes authority-seam tests.
+
+MVP-1 Provider Egress v0 evidence:
+
+1. Enforcement point: `agent/transports/chat_completions.py` after both
+   provider-profile and legacy Chat Completions payload assembly.
+2. Enterprise module: `enterprise/provider_egress.py` recursively sanitizes
+   outbound provider payload strings and emits `provider_egress_sanitized`
+   audit events only when the payload changes.
+3. Shared sanitizer: `enterprise/sanitization.py` keeps result and provider
+   boundary redaction behavior aligned.
+4. Enterprise-off gate:
+   `tests/enterprise/test_provider_egress.py::test_provider_egress_disabled_returns_payload_unchanged`
+   and
+   `tests/enterprise/test_provider_egress.py::test_chat_completions_provider_egress_disabled_preserves_transport_payload`
+   prove disabled enterprise mode returns the original provider payload and
+   preserves the Chat Completions transport payload.
+5. Enterprise-on gates:
+   `tests/enterprise/test_provider_egress.py::test_chat_completions_provider_egress_redacts_before_fake_provider`
+   and
+   `tests/enterprise/test_provider_egress.py::test_chat_completions_profile_path_uses_provider_egress`
+   prove fake secrets are absent from Chat Completions provider payloads on
+   both transport branches.
+6. Doctor evidence:
+   `tests/enterprise/test_enterprise_doctor.py` now includes the
+   `provider_egress` diagnostic check.
+7. Explicit limitation: streaming response scanning is not implemented. This
+   slice uses `request_payload_only` posture, meaning Chat Completions request
+   payloads are sanitized before streaming is enabled, but provider response
+   tokens are not buffered or scanned.
+8. Verification:
+   `python scripts\enterprise_mvp0_gate.py` passed locally with 74 enterprise
+   tests and 15 targeted Hermes authority-seam tests after this slice.

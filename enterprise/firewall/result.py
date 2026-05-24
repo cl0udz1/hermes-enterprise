@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -15,28 +14,7 @@ from enterprise.audit import AuditStore
 from enterprise.config import enterprise_config_from_root
 from enterprise.contracts import AuditEvent, AuditEventType, stable_hash
 from enterprise.mode import EnterpriseMode
-from enterprise.triage.detectors import SECRET_PATTERNS
-
-
-PROMPT_INJECTION_PATTERNS: tuple[tuple[str, re.Pattern[str], str], ...] = (
-    (
-        "instruction_override",
-        re.compile(r"(?i)\b(?:ignore|disregard|override)\s+(?:all\s+)?(?:previous|prior|above|system|developer)\s+instructions?\b"),
-        "[neutralized instruction override]",
-    ),
-    (
-        "control_tag",
-        re.compile(r"(?i)</?(?:system|developer|assistant|tool_result|tool_call|function_call|function)[^>]*>"),
-        "[neutralized control tag]",
-    ),
-    (
-        "tool_call_bait",
-        re.compile(r"(?i)\b(?:call|invoke|use|run)\s+(?:the\s+)?(?:terminal|write_file|send_message|browser|delegate_task|tool)\b"),
-        "[neutralized tool-use bait]",
-    ),
-)
-
-ROLE_MARKER = re.compile(r"(?im)^\s*(system|developer|assistant|user)\s*:")
+from enterprise.sanitization import sanitize_text_for_model_boundary
 
 
 @dataclass(frozen=True)
@@ -115,7 +93,7 @@ def _cached_root_config() -> Mapping[str, Any]:
 
 def _sanitize_content(content: Any, *, raw_sha256: str) -> tuple[Any, list[str]]:
     if isinstance(content, str):
-        sanitized, findings = _sanitize_text(content)
+        sanitized, findings = sanitize_text_for_model_boundary(content)
         if findings:
             sanitized = _label(raw_sha256, findings) + sanitized
         return sanitized, findings
@@ -154,44 +132,6 @@ def _sanitize_content(content: Any, *, raw_sha256: str) -> tuple[Any, list[str]]
         return sanitized_dict, findings
 
     return content, []
-
-
-def _sanitize_text(text: str) -> tuple[str, list[str]]:
-    sanitized = text
-    findings: list[str] = []
-
-    for name, pattern in SECRET_PATTERNS:
-        if name == "generic_secret_assignment":
-            sanitized, count = pattern.subn(_generic_secret_replacement(name), sanitized)
-        else:
-            sanitized, count = pattern.subn(f"[REDACTED:{name}]", sanitized)
-        if count:
-            findings.append(f"secret_pattern:{name}")
-
-    def _role_replacement(match: re.Match[str]) -> str:
-        role = match.group(1).lower()
-        return f"[neutralized role marker:{role}]:"
-
-    sanitized, count = ROLE_MARKER.subn(_role_replacement, sanitized)
-    if count:
-        findings.append("prompt_injection:role_marker")
-
-    for name, pattern, replacement in PROMPT_INJECTION_PATTERNS:
-        sanitized, count = pattern.subn(replacement, sanitized)
-        if count:
-            findings.append(f"prompt_injection:{name}")
-
-    return sanitized, findings
-
-
-def _generic_secret_replacement(name: str):
-    def _replace(match: re.Match[str]) -> str:
-        matched = match.group(0)
-        if "[REDACTED:" in matched:
-            return matched
-        return f"[REDACTED:{name}]"
-
-    return _replace
 
 
 def _label(raw_sha256: str, findings: Iterable[str]) -> str:

@@ -54,6 +54,11 @@ DEFAULT_ENTERPRISE_CONFIG: dict[str, Any] = {
         "denied_hosts": [],
         "allow_private_network": False,
     },
+    "provider_egress": {
+        "enabled": True,
+        "route": "chat_completions",
+        "streaming_posture": "request_payload_only",
+    },
     "sandbox": {
         "enforce_manifests": True,
     },
