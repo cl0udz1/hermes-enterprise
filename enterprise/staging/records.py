@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Iterable, Mapping
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -85,7 +86,7 @@ class StageStore:
         return conn
 
     def _init_schema(self) -> None:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS staged_executions (
@@ -114,7 +115,7 @@ class StageStore:
     def upsert_record(self, record: StagedExecutionRecord, preview: Mapping[str, Any]) -> int:
         """Create or update a staged record and return its row sequence."""
         preview_json = stable_json(dict(preview))
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             cursor = conn.execute(
                 """
                 INSERT INTO staged_executions (
@@ -158,7 +159,7 @@ class StageStore:
         return int(cursor.lastrowid)
 
     def get_record(self, stage_id: str) -> StagedExecutionRecord | None:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             row = conn.execute(
                 "SELECT record_json FROM staged_executions WHERE stage_id = ?",
                 (stage_id,),
@@ -168,7 +169,7 @@ class StageStore:
         return StagedExecutionRecord.from_json(row["record_json"])
 
     def get_by_action_hash(self, action_hash: str) -> list[StagedExecutionRecord]:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             rows = conn.execute(
                 """
                 SELECT record_json FROM staged_executions
@@ -180,7 +181,7 @@ class StageStore:
         return [StagedExecutionRecord.from_json(row["record_json"]) for row in rows]
 
     def get_preview(self, stage_id: str) -> dict[str, Any] | None:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             row = conn.execute(
                 "SELECT preview_json FROM staged_executions WHERE stage_id = ?",
                 (stage_id,),
@@ -189,18 +190,56 @@ class StageStore:
             return None
         return json.loads(row["preview_json"])
 
+    def set_status(
+        self,
+        stage_id: str,
+        status: StageStatus,
+        *,
+        approved_by: str = "",
+    ) -> StagedExecutionRecord | None:
+        """Update a staged record lifecycle status without changing its binding."""
+        record = self.get_record(stage_id)
+        if record is None:
+            return None
+        updated = StagedExecutionRecord(
+            stage_id=record.stage_id,
+            action_hash=record.action_hash,
+            subject_id=record.subject_id,
+            tool_name=record.tool_name,
+            preview_uri=record.preview_uri,
+            idempotency_key=record.idempotency_key,
+            status=status,
+            created_at=record.created_at,
+            approved_by=approved_by or record.approved_by,
+        )
+        with closing(self._connect()) as conn, conn:
+            conn.execute(
+                """
+                UPDATE staged_executions
+                SET status = ?, approved_by = ?, record_json = ?
+                WHERE stage_id = ?
+                """,
+                (
+                    updated.status.value,
+                    updated.approved_by,
+                    updated.to_json(),
+                    stage_id,
+                ),
+            )
+        return updated
+
     def list_records(self, limit: int | None = None) -> list[StagedExecutionRecord]:
         query = "SELECT record_json FROM staged_executions ORDER BY sequence ASC"
         params: tuple[int, ...] = ()
         if limit is not None:
             query += " LIMIT ?"
             params = (limit,)
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             rows = conn.execute(query, params).fetchall()
         return [StagedExecutionRecord.from_json(row["record_json"]) for row in rows]
 
     def count(self) -> int:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             row = conn.execute("SELECT COUNT(*) AS count FROM staged_executions").fetchone()
         return int(row["count"])
 

@@ -104,6 +104,12 @@ DEFAULT_ENTERPRISE_CONFIG: dict[str, Any] = {
         "max_ttl_days": 90,
         "audit_all_decisions": True,
     },
+    "access_broker": {
+        "enabled": True,
+        "default_grant_ttl_minutes": 30,
+        "policy_version": "local",
+        "audit_all_decisions": True,
+    },
     "sandbox": {
         "enforce_manifests": True,
     },

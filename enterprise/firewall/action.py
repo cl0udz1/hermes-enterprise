@@ -21,6 +21,7 @@ from enterprise.contracts import (
     StagedExecutionRecord,
     stable_hash,
 )
+from enterprise.access import AccessGrantStore, grants_for_action
 from enterprise.fast_path import FastPathDecision, apply_developer_fast_path
 from enterprise.manifests import load_core_tool_manifest
 from enterprise.mode import EnterpriseMode
@@ -91,6 +92,7 @@ def evaluate_tool_call(
     root_config: Mapping[str, Any] | None = None,
     audit_store: AuditStore | None = None,
     stage_store: StageStore | None = None,
+    access_grant_store: AccessGrantStore | None = None,
 ) -> ActionFirewallDecision:
     """Evaluate a proposed tool call before any side effect can run.
 
@@ -134,6 +136,20 @@ def evaluate_tool_call(
             "requested_side_effects": list(requested_side_effects),
         }
     )
+    access_cfg = enterprise_cfg.get("access_broker", {})
+    if not isinstance(access_cfg, Mapping):
+        access_cfg = {}
+    grants = ()
+    if bool(access_cfg.get("enabled", True)):
+        try:
+            grants = grants_for_action(
+                access_grant_store or AccessGrantStore(),
+                subject_id=subject_id,
+                action_hash=action_hash,
+                tool_name=tool_name,
+            )
+        except Exception:
+            grants = ()
 
     triage = RuntimeTriageEngine(
         manifest_index=manifest_index,
@@ -153,6 +169,7 @@ def evaluate_tool_call(
             resource_paths=sandbox_decision.observation.resource_paths,
             network_destinations=sandbox_decision.observation.network_destinations,
             data_classes=tuple(capability.data_classes) if capability else (),
+            grants=grants,
             extra_findings=sandbox_decision.findings,
         )
     )
@@ -207,6 +224,7 @@ def evaluate_tool_call(
             staged_record=staged_record,
             staging_error=staging_error,
             fast_path_decision=fast_path_decision,
+            grants=grants,
         )
     except Exception as exc:
         if mode.fail_closed_high_risk and triage_decision.risk_tier in {RiskTier.HIGH, RiskTier.CRITICAL}:
@@ -350,6 +368,7 @@ def _append_audit_events(
     staged_record: StagedExecutionRecord | None = None,
     staging_error: str = "",
     fast_path_decision: FastPathDecision | None = None,
+    grants: Iterable[Any] = (),
 ) -> tuple[str, ...]:
     created_at = datetime.now(timezone.utc).isoformat()
     raw_sha256 = stable_hash({"tool_name": tool_name, "tool_args": tool_args})
@@ -379,6 +398,9 @@ def _append_audit_events(
         base_metadata.update(fast_path_decision.metadata)
         base_metadata["fast_path_detectors"] = list(fast_path_decision.detectors)
         base_metadata["fast_path_reason"] = fast_path_decision.reason
+    grant_ids = [str(getattr(grant, "grant_id", "")) for grant in grants if getattr(grant, "grant_id", "")]
+    if grant_ids:
+        base_metadata["grant_ids"] = grant_ids
 
     for event_type in (AuditEventType.ACTION_PROPOSED, AuditEventType.POLICY_DECISION):
         event_id = stable_hash(

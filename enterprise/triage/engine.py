@@ -117,9 +117,23 @@ class RuntimeTriageEngine:
                 now=self.now or datetime.now(timezone.utc),
             )
         )
+        has_valid_grant = bool(request.grants) and not any(
+            finding.detector.startswith("grant_status:")
+            and finding.outcome is DecisionOutcome.DENY
+            for finding in findings
+        )
+        if has_valid_grant:
+            findings.append(
+                DetectorFinding(
+                    detector="grant_status:valid",
+                    outcome=DecisionOutcome.ALLOW,
+                    risk_tier=RiskTier.LOW,
+                    reason="Valid access grant covers the action.",
+                )
+            )
 
         latency_ms = max(0, int((time.perf_counter() - started) * 1000))
-        outcome = self._outcome_for(capability, findings)
+        outcome = self._outcome_for(capability, findings, has_valid_grant=has_valid_grant)
         risk_tier = self._risk_tier_for(capability, findings)
         detectors = [finding.detector for finding in findings] or ["deterministic_allow"]
         reason = "; ".join(finding.reason for finding in findings)
@@ -149,11 +163,15 @@ class RuntimeTriageEngine:
     def _outcome_for(
         capability: Any,
         findings: list[DetectorFinding],
+        *,
+        has_valid_grant: bool = False,
     ) -> DecisionOutcome:
         if any(finding.outcome is DecisionOutcome.DENY for finding in findings):
             return DecisionOutcome.DENY
         if any(finding.outcome is DecisionOutcome.QUARANTINE for finding in findings):
             return DecisionOutcome.QUARANTINE
+        if has_valid_grant:
+            return DecisionOutcome.ALLOW
         if capability and capability.approval_required:
             return DecisionOutcome.APPROVAL_REQUIRED
         if capability and capability.is_high_risk:

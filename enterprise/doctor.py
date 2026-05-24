@@ -78,6 +78,7 @@ def run_enterprise_doctor(
         _check_plugin_mcp_admission(),
         _check_gateway_identity(mode, enterprise_cfg),
         _check_cron_governance(mode, enterprise_cfg),
+        _check_access_broker(mode, enterprise_cfg),
         _check_streaming_policy(mode, enterprise_cfg),
     ]
     return EnterpriseDoctorReport(
@@ -724,6 +725,129 @@ def _check_cron_governance(
             "Cron governance",
             str(exc),
             "Repair enterprise.cron_governance before enabling enterprise cron mode.",
+        )
+
+
+def _check_access_broker(
+    mode: EnterpriseMode,
+    enterprise_cfg: Mapping[str, Any],
+) -> EnterpriseDoctorCheck:
+    access_cfg = enterprise_cfg.get("access_broker", {})
+    if not isinstance(access_cfg, Mapping):
+        return _fail(
+            "access_broker",
+            "Access broker",
+            "enterprise.access_broker must be a mapping",
+            "Restore enterprise.access_broker to a mapping with grant TTL and policy settings.",
+        )
+    if not mode.enabled:
+        return _pass("access_broker", "Access broker", "not enforced while enterprise mode is disabled")
+    if not bool(access_cfg.get("enabled", True)):
+        return _edition_sensitive_missing(
+            mode,
+            "access_broker",
+            "Access broker",
+            "approval grant lifecycle is disabled",
+            "Enable enterprise.access_broker before team rollout.",
+        )
+    try:
+        from datetime import datetime, timedelta, timezone
+
+        from enterprise.access import AccessGrantStore
+        from enterprise.audit import AuditStore
+        from enterprise.contracts import DecisionOutcome
+        from enterprise.firewall.action import evaluate_tool_call
+        from enterprise.staging import StageStore
+
+        with tempfile.TemporaryDirectory(prefix="hermes-enterprise-access-doctor-") as tmp:
+            base = Path(tmp)
+            audit = AuditStore(base / "audit.sqlite3")
+            stages = StageStore(base / "staged.sqlite3")
+            grants = AccessGrantStore(base / "grants.sqlite3")
+            root_config = {"enterprise": {"enabled": True, "access_broker": dict(access_cfg)}}
+            staged = evaluate_tool_call(
+                "terminal",
+                {"command": "echo doctor"},
+                root_config=root_config,
+                audit_store=audit,
+                stage_store=stages,
+                access_grant_store=grants,
+                task_id="doctor-task",
+                tool_call_id="doctor-call",
+            )
+            if staged.staged_record is None:
+                return _fail(
+                    "access_broker",
+                    "Access broker",
+                    "doctor probe did not create a staged record",
+                    "Repair staged execution before enabling access grants.",
+                )
+            grant = grants.approve_stage(
+                staged.staged_record.stage_id,
+                stage_store=stages,
+                approved_by="doctor-approver",
+                expires_at=(datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat(),
+                audit_store=audit,
+            )
+            allowed = evaluate_tool_call(
+                "terminal",
+                {"command": "echo doctor"},
+                root_config=root_config,
+                audit_store=audit,
+                stage_store=stages,
+                access_grant_store=grants,
+                task_id="doctor-task",
+                tool_call_id="doctor-call",
+            )
+            changed = evaluate_tool_call(
+                "terminal",
+                {"command": "echo changed"},
+                root_config=root_config,
+                audit_store=audit,
+                stage_store=stages,
+                access_grant_store=grants,
+                task_id="doctor-task",
+                tool_call_id="doctor-call",
+            )
+            revoked = grants.revoke_grant(grant.grant_id, revoked_by="doctor-approver", audit_store=audit)
+            denied = evaluate_tool_call(
+                "terminal",
+                {"command": "echo doctor"},
+                root_config=root_config,
+                audit_store=audit,
+                stage_store=stages,
+                access_grant_store=grants,
+                task_id="doctor-task",
+                tool_call_id="doctor-call",
+            )
+            if allowed.triage_decision is None or allowed.triage_decision.outcome is not DecisionOutcome.ALLOW:
+                return _fail(
+                    "access_broker",
+                    "Access broker",
+                    "valid grant probe did not allow exact staged action",
+                    "Repair access grant lookup or triage grant handling.",
+                )
+            if changed.action_hash == staged.action_hash or changed.allows_execution:
+                return _fail(
+                    "access_broker",
+                    "Access broker",
+                    "changed action reused an approval grant",
+                    "Bind access grants to the action hash before execution.",
+                )
+            if revoked is None or denied.triage_decision is None or denied.triage_decision.outcome is not DecisionOutcome.DENY:
+                return _fail(
+                    "access_broker",
+                    "Access broker",
+                    "revoked grant probe was not denied",
+                    "Repair grant revocation checks before team rollout.",
+                )
+        return _pass("access_broker", "Access broker", "grant approve, exact reuse, changed-args, and revoke probes passed")
+    except Exception as exc:
+        return _fail(
+            "access_broker",
+            "Access broker",
+            str(exc),
+            "Repair enterprise.access_broker before enabling approval lifecycle mode.",
         )
 
 
