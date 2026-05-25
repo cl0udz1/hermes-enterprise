@@ -807,6 +807,70 @@ class TestNewEndpoints:
         resp = self.client.get("/api/profiles/nonexistent/soul")
         assert resp.status_code == 404
 
+    def test_enterprise_control_center_denies_employee_role(self):
+        from hermes_constants import get_hermes_home
+
+        home = get_hermes_home()
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "config.yaml").write_text(
+            "enterprise:\n"
+            "  enabled: true\n"
+            "  mode: team\n"
+            "  control_center:\n"
+            "    enabled: true\n"
+            "    require_proxy_identity: true\n",
+            encoding="utf-8",
+        )
+
+        resp = self.client.get(
+            "/api/enterprise/console",
+            headers={
+                "x-hermes-subject": "employee:jane",
+                "x-hermes-roles": "employee",
+            },
+        )
+
+        assert resp.status_code == 403
+
+    def test_enterprise_assignments_create_and_revoke(self):
+        from hermes_constants import get_hermes_home
+
+        get_hermes_home().mkdir(parents=True, exist_ok=True)
+
+        created = self.client.post(
+            "/api/enterprise/assignments",
+            json={
+                "subject_id": "employee:jane",
+                "agent_id": "repo-coder",
+                "profile_id": "default",
+                "role": "employee",
+                "assigned_by": "manager-1",
+                "assignment_reason": "ticket SEC-42",
+                "allowed_surfaces": ["dashboard", "gateway"],
+                "workspace_scope": ["repo:billing-api"],
+            },
+        )
+
+        assert created.status_code == 200
+        assignment = created.json()["assignment"]
+        assert assignment["subject_id"] == "employee:jane"
+        assert assignment["status"] == "active"
+
+        listed = self.client.get("/api/enterprise/assignments")
+        assert listed.status_code == 200
+        assert listed.json()["assignments"][0]["assignment_id"] == assignment["assignment_id"]
+
+        revoked = self.client.post(
+            f"/api/enterprise/assignments/{assignment['assignment_id']}/revoke",
+            json={"revoked_by": "manager-1"},
+        )
+
+        assert revoked.status_code == 200
+        assert revoked.json()["assignment"]["status"] == "revoked"
+        console = self.client.get("/api/enterprise/console")
+        assert console.status_code == 200
+        assert console.json()["counts"]["audit_total"] == 2
+
     def test_skills_list(self):
         resp = self.client.get("/api/skills")
         assert resp.status_code == 200

@@ -45,6 +45,8 @@ class AuditEventType(str, Enum):
     AUTHORITY_ADMISSION_DECISION = "authority_admission_decision"
     GATEWAY_IDENTITY_DECISION = "gateway_identity_decision"
     CRON_GOVERNANCE_DECISION = "cron_governance_decision"
+    AGENT_ASSIGNMENT_CREATED = "agent_assignment_created"
+    AGENT_ASSIGNMENT_REVOKED = "agent_assignment_revoked"
     SANDBOX_VIOLATION = "sandbox_violation"
     HYDRATION_DECISION = "hydration_decision"
     AUDIT_ERROR = "audit_error"
@@ -64,6 +66,13 @@ class StageStatus(str, Enum):
     DENIED = "denied"
     EXPIRED = "expired"
     CANCELLED = "cancelled"
+
+
+class AssignmentStatus(str, Enum):
+    ACTIVE = "active"
+    PAUSED = "paused"
+    REVOKED = "revoked"
+    EXPIRED = "expired"
 
 
 def _json_value(value: Any) -> Any:
@@ -258,6 +267,26 @@ class GatewayIdentityDecision(JsonContract):
     thread_id_hash: str = ""
     chat_type: str = ""
     audit_event_ids: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class AgentAssignmentRecord(JsonContract):
+    assignment_id: str
+    subject_id: str
+    agent_id: str
+    profile_id: str
+    role: str
+    status: AssignmentStatus
+    assigned_by: str
+    assignment_reason: str
+    allowed_surfaces: list[str] = field(default_factory=list)
+    workspace_scope: list[str] = field(default_factory=list)
+    tool_policy: list[str] = field(default_factory=list)
+    memory_scope: list[str] = field(default_factory=list)
+    created_at: str = ""
+    expires_at: str = ""
+    revoked_at: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

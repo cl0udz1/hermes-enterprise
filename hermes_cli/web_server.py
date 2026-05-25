@@ -54,7 +54,7 @@ try:
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
     from fastapi.staticfiles import StaticFiles
-    from pydantic import BaseModel
+    from pydantic import BaseModel, Field
 except ImportError:
     # First try lazy-installing the dashboard extras. Only the user actually
     # running `hermes dashboard` needs fastapi+uvicorn; lazy install keeps
@@ -66,7 +66,7 @@ except ImportError:
         from fastapi.middleware.cors import CORSMiddleware
         from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
         from fastapi.staticfiles import StaticFiles
-        from pydantic import BaseModel
+        from pydantic import BaseModel, Field
     except Exception:
         raise SystemExit(
             "Web UI requires fastapi and uvicorn.\n"
@@ -2561,10 +2561,44 @@ class EnterpriseApprovalDeny(BaseModel):
     reason: str = ""
 
 
+class EnterpriseAssignmentCreate(BaseModel):
+    subject_id: str
+    agent_id: str
+    profile_id: str = "default"
+    role: str = "employee"
+    assigned_by: str = "dashboard-operator"
+    assignment_reason: str = ""
+    allowed_surfaces: List[str] = Field(
+        default_factory=lambda: ["dashboard", "cli", "tui", "gateway"]
+    )
+    workspace_scope: List[str] = Field(default_factory=list)
+    tool_policy: List[str] = Field(default_factory=list)
+    memory_scope: List[str] = Field(default_factory=list)
+    expires_at: str = ""
+
+
+class EnterpriseAssignmentRevoke(BaseModel):
+    revoked_by: str = "dashboard-operator"
+
+
+def _require_enterprise_control(request: Request, capability: str = "view") -> Dict[str, Any]:
+    from enterprise.control_center import evaluate_control_center_access
+
+    decision = evaluate_control_center_access(
+        dict(request.headers),
+        root_config=load_config(),
+        capability=capability,
+    )
+    if not decision.allowed:
+        raise HTTPException(status_code=403, detail=decision.reason)
+    return decision.to_dict()
+
+
 @app.get("/api/enterprise/console")
-async def get_enterprise_console(recent_limit: int = 25):
+async def get_enterprise_console(request: Request, recent_limit: int = 25):
     from enterprise.console import build_enterprise_console_snapshot
 
+    _require_enterprise_control(request, "view")
     limit = max(1, min(int(recent_limit), 100))
     return build_enterprise_console_snapshot(
         root_config=load_config(),
@@ -2573,9 +2607,10 @@ async def get_enterprise_console(recent_limit: int = 25):
 
 
 @app.get("/api/enterprise/evidence")
-async def get_enterprise_evidence(stage_id: Optional[str] = None, recent_limit: int = 100):
+async def get_enterprise_evidence(request: Request, stage_id: Optional[str] = None, recent_limit: int = 100):
     from enterprise.console import build_enterprise_evidence_bundle
 
+    _require_enterprise_control(request, "view")
     limit = max(1, min(int(recent_limit), 250))
     try:
         return build_enterprise_evidence_bundle(
@@ -2588,9 +2623,10 @@ async def get_enterprise_evidence(stage_id: Optional[str] = None, recent_limit: 
 
 
 @app.post("/api/enterprise/approvals/{stage_id}/approve")
-async def approve_enterprise_approval(stage_id: str, body: EnterpriseApprovalApprove):
+async def approve_enterprise_approval(request: Request, stage_id: str, body: EnterpriseApprovalApprove):
     from enterprise.console import approve_console_stage
 
+    _require_enterprise_control(request, "approve")
     try:
         return approve_console_stage(
             stage_id,
@@ -2607,9 +2643,10 @@ async def approve_enterprise_approval(stage_id: str, body: EnterpriseApprovalApp
 
 
 @app.post("/api/enterprise/approvals/{stage_id}/deny")
-async def deny_enterprise_approval(stage_id: str, body: EnterpriseApprovalDeny):
+async def deny_enterprise_approval(request: Request, stage_id: str, body: EnterpriseApprovalDeny):
     from enterprise.console import deny_console_stage
 
+    _require_enterprise_control(request, "approve")
     try:
         return deny_console_stage(stage_id, denied_by=body.denied_by, reason=body.reason)
     except KeyError:
@@ -2617,6 +2654,95 @@ async def deny_enterprise_approval(stage_id: str, body: EnterpriseApprovalDeny):
     except Exception as e:
         _log.exception("POST /api/enterprise/approvals/%s/deny failed", stage_id)
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/enterprise/assignments")
+async def list_enterprise_assignments(request: Request, recent_limit: int = 100):
+    from enterprise.assignments import AgentAssignmentStore, assignment_to_summary
+
+    control = _require_enterprise_control(request, "view")
+    limit = max(1, min(int(recent_limit), 250))
+    store = AgentAssignmentStore()
+    records = store.list()
+    profiles = _cron_profile_dicts()
+    return {
+        "control": control,
+        "profiles": profiles,
+        "assignments": [
+            assignment_to_summary(record)
+            for record in reversed(records)
+        ][:limit],
+    }
+
+
+@app.post("/api/enterprise/assignments")
+async def create_enterprise_assignment(request: Request, body: EnterpriseAssignmentCreate):
+    from enterprise.assignments import AgentAssignmentStore, append_assignment_audit_event, assignment_to_summary
+    from enterprise.audit import AuditStore
+    from enterprise.contracts import AuditEventType
+
+    control = _require_enterprise_control(request, "assign")
+    try:
+        _resolve_profile_dir(body.profile_id)
+        record = AgentAssignmentStore().create(
+            subject_id=body.subject_id,
+            agent_id=body.agent_id,
+            profile_id=body.profile_id,
+            role=body.role,
+            assigned_by=body.assigned_by,
+            assignment_reason=body.assignment_reason,
+            allowed_surfaces=body.allowed_surfaces,
+            workspace_scope=body.workspace_scope,
+            tool_policy=body.tool_policy,
+            memory_scope=body.memory_scope,
+            expires_at=body.expires_at,
+            metadata={"control_subject": control["subject"]["subject_id"]},
+        )
+        append_assignment_audit_event(
+            AuditStore(),
+            record,
+            event_type=AuditEventType.AGENT_ASSIGNMENT_CREATED,
+            actor_id=body.assigned_by,
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        _log.exception("POST /api/enterprise/assignments failed")
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "assignment": assignment_to_summary(record)}
+
+
+@app.post("/api/enterprise/assignments/{assignment_id}/revoke")
+async def revoke_enterprise_assignment(
+    request: Request,
+    assignment_id: str,
+    body: EnterpriseAssignmentRevoke,
+):
+    from enterprise.assignments import AgentAssignmentStore, append_assignment_audit_event, assignment_to_summary
+    from enterprise.audit import AuditStore
+    from enterprise.contracts import AuditEventType
+
+    _require_enterprise_control(request, "assign")
+    try:
+        record = AgentAssignmentStore().revoke(
+            assignment_id,
+            revoked_by=body.revoked_by,
+        )
+        if record is not None:
+            append_assignment_audit_event(
+                AuditStore(),
+                record,
+                event_type=AuditEventType.AGENT_ASSIGNMENT_REVOKED,
+                actor_id=body.revoked_by,
+            )
+    except Exception as e:
+        _log.exception("POST /api/enterprise/assignments/%s/revoke failed", assignment_id)
+        raise HTTPException(status_code=400, detail=str(e))
+    if record is None:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    return {"ok": True, "assignment": assignment_to_summary(record)}
 
 
 # ---------------------------------------------------------------------------
