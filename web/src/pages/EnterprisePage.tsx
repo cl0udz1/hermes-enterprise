@@ -4,11 +4,14 @@ import {
   AlertTriangle,
   Check,
   Clock,
+  Download,
+  Eye,
   FileText,
   KeyRound,
   RefreshCw,
   Shield,
   UserCheck,
+  UserRound,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -16,6 +19,7 @@ import { Badge } from "@nous-research/ui/ui/components/badge";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { H2 } from "@/components/NouiTypography";
 import { api } from "@/lib/api";
 import type {
@@ -56,19 +60,49 @@ function compactList(values: string[], fallback = "-"): string {
   return values.slice(0, 3).join(", ") + (values.length > 3 ? ` +${values.length - 3}` : "");
 }
 
+function formatSafeValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === null || value === undefined) return "-";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
 function safeArgsPreview(args: Record<string, unknown>): string {
   const entries = Object.entries(args);
   if (!entries.length) return "-";
   return entries
     .slice(0, 4)
-    .map(([key, value]) => `${key}: ${String(value)}`)
+    .map(([key, value]) => `${key}: ${formatSafeValue(value)}`)
     .join(" | ");
+}
+
+function downloadJson(filename: string, payload: unknown) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function defaultOperatorId(): string {
+  if (typeof window === "undefined") return "dashboard-operator";
+  return window.localStorage.getItem("hermes.enterprise.operator") || "dashboard-operator";
 }
 
 export default function EnterprisePage() {
   const [snapshot, setSnapshot] = useState<EnterpriseConsoleResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyStage, setBusyStage] = useState<string | null>(null);
+  const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
+  const [operatorId, setOperatorId] = useState(defaultOperatorId);
+  const [approvalReason, setApprovalReason] = useState("");
+  const [ttlMinutes, setTtlMinutes] = useState(30);
   const { toast, showToast } = useToast();
   const { setAfterTitle, setEnd } = usePageHeader();
 
@@ -86,6 +120,38 @@ export default function EnterprisePage() {
   }, [load]);
 
   const overall = snapshot?.doctor.overall ?? "unknown";
+  const selectedStage = useMemo(
+    () =>
+      snapshot?.pending_approvals.find((stage) => stage.stage_id === selectedStageId) ??
+      snapshot?.pending_approvals[0] ??
+      null,
+    [selectedStageId, snapshot],
+  );
+
+  useEffect(() => {
+    if (!snapshot) return;
+    if (snapshot.pending_approvals.length === 0) {
+      setSelectedStageId(null);
+      return;
+    }
+    if (!selectedStageId || !snapshot.pending_approvals.some((stage) => stage.stage_id === selectedStageId)) {
+      setSelectedStageId(snapshot.pending_approvals[0].stage_id);
+    }
+  }, [selectedStageId, snapshot]);
+
+  const exportEvidence = useCallback(
+    async (stage?: EnterpriseApprovalSummary | null) => {
+      try {
+        const bundle = await api.getEnterpriseEvidence(stage?.stage_id);
+        const suffix = stage?.stage_id ? shortHash(stage.stage_id).replace(/[^a-z0-9-]/gi, "") : "console";
+        downloadJson(`hermes-enterprise-evidence-${suffix}.json`, bundle);
+        showToast("Evidence exported", "success");
+      } catch (err) {
+        showToast(`Evidence export failed: ${err}`, "error");
+      }
+    },
+    [showToast],
+  );
 
   useLayoutEffect(() => {
     setAfterTitle(
@@ -97,24 +163,37 @@ export default function EnterprisePage() {
       </span>,
     );
     setEnd(
-      <Button
-        type="button"
-        size="sm"
-        outlined
-        onClick={load}
-        disabled={loading}
-        title="Refresh"
-        aria-label="Refresh enterprise console"
-      >
-        {loading ? <Spinner /> : <RefreshCw className="h-3 w-3" />}
-        Refresh
-      </Button>,
+      <span className="flex items-center gap-2">
+        <Button
+          type="button"
+          size="sm"
+          outlined
+          onClick={() => exportEvidence()}
+          title="Export evidence"
+          aria-label="Export enterprise evidence"
+        >
+          <Download className="h-3 w-3" />
+          Export
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          outlined
+          onClick={load}
+          disabled={loading}
+          title="Refresh"
+          aria-label="Refresh enterprise console"
+        >
+          {loading ? <Spinner /> : <RefreshCw className="h-3 w-3" />}
+          Refresh
+        </Button>
+      </span>,
     );
     return () => {
       setAfterTitle(null);
       setEnd(null);
     };
-  }, [load, loading, overall, setAfterTitle, setEnd]);
+  }, [exportEvidence, load, loading, overall, setAfterTitle, setEnd]);
 
   const failedChecks = useMemo(
     () => snapshot?.doctor.checks.filter((item) => item.status === "fail") ?? [],
@@ -126,14 +205,23 @@ export default function EnterprisePage() {
   );
 
   const approve = async (stage: EnterpriseApprovalSummary) => {
+    const reason = approvalReason.trim();
+    const operator = operatorId.trim() || "dashboard-operator";
+    if (!reason) {
+      showToast("Approval reason is required", "error");
+      return;
+    }
     setBusyStage(stage.stage_id);
     try {
+      window.localStorage.setItem("hermes.enterprise.operator", operator);
       await api.approveEnterpriseApproval(stage.stage_id, {
-        approved_by: "dashboard-operator",
-        ttl_minutes: 30,
+        approved_by: operator,
+        ttl_minutes: ttlMinutes,
         policy_version: "dashboard",
+        reason,
       });
       showToast(`Approved ${stage.tool_name}`, "success");
+      setApprovalReason("");
       load();
     } catch (err) {
       showToast(`Approval failed: ${err}`, "error");
@@ -143,12 +231,21 @@ export default function EnterprisePage() {
   };
 
   const deny = async (stage: EnterpriseApprovalSummary) => {
+    const reason = approvalReason.trim();
+    const operator = operatorId.trim() || "dashboard-operator";
+    if (!reason) {
+      showToast("Denial reason is required", "error");
+      return;
+    }
     setBusyStage(stage.stage_id);
     try {
+      window.localStorage.setItem("hermes.enterprise.operator", operator);
       await api.denyEnterpriseApproval(stage.stage_id, {
-        denied_by: "dashboard-operator",
+        denied_by: operator,
+        reason,
       });
       showToast(`Denied ${stage.tool_name}`, "success");
+      setApprovalReason("");
       load();
     } catch (err) {
       showToast(`Deny failed: ${err}`, "error");
@@ -203,23 +300,36 @@ export default function EnterprisePage() {
             />
           </div>
 
-          <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.75fr)]">
+          <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.9fr)]">
             <ApprovalQueue
               approvals={snapshot.pending_approvals}
               busyStage={busyStage}
-              onApprove={approve}
-              onDeny={deny}
+              selectedStageId={selectedStage?.stage_id ?? null}
+              onSelect={setSelectedStageId}
             />
 
+            <ApprovalInspector
+              stage={selectedStage}
+              busy={selectedStage ? busyStage === selectedStage.stage_id : false}
+              operatorId={operatorId}
+              reason={approvalReason}
+              ttlMinutes={ttlMinutes}
+              onOperatorChange={setOperatorId}
+              onReasonChange={setApprovalReason}
+              onTtlChange={setTtlMinutes}
+              onApprove={approve}
+              onDeny={deny}
+              onExport={exportEvidence}
+            />
+          </div>
+
+          <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-3">
             <ControlHealth
               checks={snapshot.doctor.checks}
               failedChecks={failedChecks}
               warningChecks={warningChecks}
               counts={snapshot.counts}
             />
-          </div>
-
-          <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
             <GrantList grants={snapshot.recent_grants} />
             <AuditTimeline events={snapshot.recent_events} />
           </div>
@@ -267,13 +377,13 @@ function MetricCard({
 function ApprovalQueue({
   approvals,
   busyStage,
-  onApprove,
-  onDeny,
+  selectedStageId,
+  onSelect,
 }: {
   approvals: EnterpriseApprovalSummary[];
   busyStage: string | null;
-  onApprove: (stage: EnterpriseApprovalSummary) => void;
-  onDeny: (stage: EnterpriseApprovalSummary) => void;
+  selectedStageId: string | null;
+  onSelect: (stageId: string) => void;
 }) {
   return (
     <section className="flex min-w-0 flex-col gap-3">
@@ -291,8 +401,15 @@ function ApprovalQueue({
       ) : (
         approvals.map((stage) => {
           const busy = busyStage === stage.stage_id;
+          const selected = selectedStageId === stage.stage_id;
           return (
-            <Card key={stage.stage_id} className="min-w-0 overflow-hidden">
+            <Card
+              key={stage.stage_id}
+              className={cn(
+                "min-w-0 overflow-hidden transition-colors",
+                selected && "border-primary/70 bg-primary/5",
+              )}
+            >
               <CardContent className="grid gap-4 py-4 lg:grid-cols-[minmax(0,1fr)_auto]">
                 <div className="min-w-0">
                   <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2">
@@ -321,25 +438,14 @@ function ApprovalQueue({
                 <div className="flex items-start justify-end gap-1">
                   <Button
                     size="sm"
-                    onClick={() => onApprove(stage)}
+                    outlined={!selected}
+                    onClick={() => onSelect(stage.stage_id)}
                     disabled={busy}
-                    title="Approve"
-                    aria-label={`Approve ${stage.tool_name}`}
+                    title="Review"
+                    aria-label={`Review ${stage.tool_name}`}
                   >
-                    {busy ? <Spinner /> : <Check className="h-3 w-3" />}
-                    Approve
-                  </Button>
-                  <Button
-                    size="sm"
-                    outlined
-                    destructive
-                    onClick={() => onDeny(stage)}
-                    disabled={busy}
-                    title="Deny"
-                    aria-label={`Deny ${stage.tool_name}`}
-                  >
-                    <X className="h-3 w-3" />
-                    Deny
+                    {busy ? <Spinner /> : <Eye className="h-3 w-3" />}
+                    Review
                   </Button>
                 </div>
               </CardContent>
@@ -347,6 +453,164 @@ function ApprovalQueue({
           );
         })
       )}
+    </section>
+  );
+}
+
+function ApprovalInspector({
+  stage,
+  busy,
+  operatorId,
+  reason,
+  ttlMinutes,
+  onOperatorChange,
+  onReasonChange,
+  onTtlChange,
+  onApprove,
+  onDeny,
+  onExport,
+}: {
+  stage: EnterpriseApprovalSummary | null;
+  busy: boolean;
+  operatorId: string;
+  reason: string;
+  ttlMinutes: number;
+  onOperatorChange: (value: string) => void;
+  onReasonChange: (value: string) => void;
+  onTtlChange: (value: number) => void;
+  onApprove: (stage: EnterpriseApprovalSummary) => void;
+  onDeny: (stage: EnterpriseApprovalSummary) => void;
+  onExport: (stage?: EnterpriseApprovalSummary | null) => void;
+}) {
+  const reasonReady = reason.trim().length > 0;
+
+  return (
+    <section className="flex min-w-0 flex-col gap-3">
+      <H2 variant="sm" className="flex items-center gap-2 text-muted-foreground">
+        <UserRound className="h-4 w-4" />
+        Operator review
+      </H2>
+
+      <Card className="min-w-0 overflow-hidden">
+        {!stage ? (
+          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+            No action selected.
+          </CardContent>
+        ) : (
+          <>
+            <CardHeader className="gap-3 px-4 py-3">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <Badge tone={statusTone(stage.risk_tier)}>{stage.risk_tier || "risk"}</Badge>
+                <span className="truncate font-medium text-sm">{stage.tool_name}</span>
+                <Badge tone="outline">{stage.subject_id}</Badge>
+              </div>
+              <p className="line-clamp-2 text-xs text-muted-foreground">
+                {safeArgsPreview(stage.safe_args)}
+              </p>
+            </CardHeader>
+
+            <CardContent className="grid gap-4">
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_120px]">
+                <label className="grid gap-1 text-xs text-muted-foreground">
+                  Operator
+                  <Input
+                    value={operatorId}
+                    onChange={(event) => onOperatorChange(event.target.value)}
+                    placeholder="manager-id"
+                  />
+                </label>
+                <label className="grid gap-1 text-xs text-muted-foreground">
+                  Grant TTL
+                  <Input
+                    min={1}
+                    max={1440}
+                    type="number"
+                    value={ttlMinutes}
+                    onChange={(event) => onTtlChange(Math.max(1, Number(event.target.value) || 1))}
+                  />
+                </label>
+              </div>
+
+              <label className="grid gap-1 text-xs text-muted-foreground">
+                Decision reason
+                <textarea
+                  value={reason}
+                  onChange={(event) => onReasonChange(event.target.value)}
+                  placeholder="ticket, incident, or business reason"
+                  className="min-h-24 w-full resize-y border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                />
+              </label>
+
+              <dl className="grid min-w-0 gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+                <KeyValue label="Stage" value={shortHash(stage.stage_id)} mono />
+                <KeyValue label="Action" value={shortHash(stage.action_hash)} mono />
+                <KeyValue label="Idempotency" value={shortHash(stage.idempotency_key)} mono />
+                <KeyValue label="Created" value={formatTime(stage.created_at)} />
+                <KeyValue label="Effects" value={compactList(stage.requested_side_effects)} />
+                <KeyValue label="Detectors" value={compactList(stage.detectors)} />
+              </dl>
+
+              <div className="grid gap-2 border-t border-border pt-3">
+                <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                  Redacted preview
+                </p>
+                <div className="grid gap-1">
+                  {Object.entries(stage.safe_args).length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No preview fields.</p>
+                  ) : (
+                    Object.entries(stage.safe_args).map(([key, value]) => (
+                      <div
+                        key={key}
+                        className="grid min-w-0 gap-1 border border-border bg-secondary/20 px-3 py-2 text-xs sm:grid-cols-[110px_minmax(0,1fr)]"
+                      >
+                        <span className="truncate text-muted-foreground">{key}</span>
+                        <span className="truncate font-mono-ui text-foreground">
+                          {formatSafeValue(value)}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button
+                  size="sm"
+                  outlined
+                  onClick={() => onExport(stage)}
+                  title="Export stage evidence"
+                  aria-label={`Export evidence for ${stage.tool_name}`}
+                >
+                  <Download className="h-3 w-3" />
+                  Export
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => onApprove(stage)}
+                  disabled={busy || !reasonReady}
+                  title="Approve"
+                  aria-label={`Approve ${stage.tool_name}`}
+                >
+                  {busy ? <Spinner /> : <Check className="h-3 w-3" />}
+                  Approve
+                </Button>
+                <Button
+                  size="sm"
+                  outlined
+                  destructive
+                  onClick={() => onDeny(stage)}
+                  disabled={busy || !reasonReady}
+                  title="Deny"
+                  aria-label={`Deny ${stage.tool_name}`}
+                >
+                  <X className="h-3 w-3" />
+                  Deny
+                </Button>
+              </div>
+            </CardContent>
+          </>
+        )}
+      </Card>
     </section>
   );
 }
@@ -471,8 +735,13 @@ function AuditTimeline({ events }: { events: EnterpriseAuditEventSummary[] }) {
                     </span>
                   </div>
                   <p className="truncate text-sm">{event.redacted_preview}</p>
+                  {event.operator_reason && (
+                    <p className="line-clamp-2 text-xs text-muted-foreground">
+                      {event.operator_id || "operator"}: {event.operator_reason}
+                    </p>
+                  )}
                   <p className="truncate font-mono-ui text-xs text-muted-foreground">
-                    {event.subject_id} | {shortHash(event.action_id)}
+                    {event.subject_id} | {event.tool_name || "-"} | {shortHash(event.action_id)}
                   </p>
                 </div>
               ))}

@@ -10,6 +10,10 @@ from enterprise.audit import AuditStore
 from enterprise.contracts import AuditEvent, AuditEventType, StageStatus, stable_hash
 from enterprise.doctor import run_enterprise_doctor
 from enterprise.staging import StageStore
+from enterprise.triage.detectors import SECRET_PATTERNS
+
+
+MAX_OPERATOR_REASON = 500
 
 
 def build_enterprise_console_snapshot(
@@ -85,6 +89,7 @@ def approve_console_stage(
     approved_by: str,
     ttl_minutes: int = 30,
     policy_version: str = "dashboard",
+    reason: str = "",
     audit_store: AuditStore | None = None,
     stage_store: StageStore | None = None,
     access_grant_store: AccessGrantStore | None = None,
@@ -100,6 +105,7 @@ def approve_console_stage(
         approved_by=approved_by.strip() or "dashboard-operator",
         ttl_minutes=max(1, int(ttl_minutes)),
         policy_version=policy_version.strip() or "dashboard",
+        reason=_safe_operator_text(reason),
         audit_store=audit,
     )
     return {"ok": True, "grant": _grant_summary(grant)}
@@ -109,6 +115,7 @@ def deny_console_stage(
     stage_id: str,
     *,
     denied_by: str,
+    reason: str = "",
     audit_store: AuditStore | None = None,
     stage_store: StageStore | None = None,
 ) -> dict[str, Any]:
@@ -123,8 +130,90 @@ def deny_console_stage(
     )
     if record is None:
         raise KeyError(stage_id)
-    _append_stage_denied_event(audit, record)
+    _append_stage_denied_event(audit, record, reason=_safe_operator_text(reason))
     return {"ok": True, "stage": _stage_summary(record, stages.get_preview(stage_id))}
+
+
+def build_enterprise_evidence_bundle(
+    *,
+    stage_id: str | None = None,
+    root_config: dict[str, Any] | None = None,
+    audit_store: AuditStore | None = None,
+    stage_store: StageStore | None = None,
+    access_grant_store: AccessGrantStore | None = None,
+    recent_limit: int = 100,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Return a redacted evidence export for operator review and audit handoff."""
+
+    audit = audit_store or AuditStore()
+    stages = stage_store or StageStore()
+    grants = access_grant_store or AccessGrantStore()
+    current_time = now or datetime.now(timezone.utc)
+    events = audit.list_events()
+    grant_rows = grants.list_grants()
+    exported_at = current_time.isoformat()
+
+    if stage_id:
+        record = stages.get_record(stage_id)
+        if record is None:
+            raise KeyError(stage_id)
+        stage = _stage_summary(record, stages.get_preview(stage_id))
+        related_events = [
+            _event_summary(event)
+            for event in events
+            if _event_matches_stage(event, stage_id=record.stage_id, action_hash=record.action_hash)
+        ]
+        related_grants = [
+            _grant_summary(grant, now=current_time)
+            for grant in grant_rows
+            if grant.stage_id == record.stage_id or grant.action_hash == record.action_hash
+        ]
+        return _with_evidence_hash(
+            {
+                "schema_version": 1,
+                "scope": "stage",
+                "exported_at": exported_at,
+                "redaction": {
+                    "raw_payloads_excluded": True,
+                    "operator_text_redacted": True,
+                    "raw_hashes_retained": True,
+                },
+                "stage": stage,
+                "grants": related_grants[:recent_limit],
+                "events": related_events[:recent_limit],
+                "doctor": build_enterprise_console_snapshot(
+                    root_config=root_config,
+                    audit_store=audit,
+                    stage_store=stages,
+                    access_grant_store=grants,
+                    recent_limit=1,
+                    now=current_time,
+                )["doctor"],
+            }
+        )
+
+    snapshot = build_enterprise_console_snapshot(
+        root_config=root_config,
+        audit_store=audit,
+        stage_store=stages,
+        access_grant_store=grants,
+        recent_limit=recent_limit,
+        now=current_time,
+    )
+    return _with_evidence_hash(
+        {
+            "schema_version": 1,
+            "scope": "console",
+            "exported_at": exported_at,
+            "redaction": {
+                "raw_payloads_excluded": True,
+                "operator_text_redacted": True,
+                "raw_hashes_retained": True,
+            },
+            "snapshot": snapshot,
+        }
+    )
 
 
 def _stage_counts(records: list[Any]) -> dict[str, int]:
@@ -195,6 +284,7 @@ def _grant_summary(grant: Any, *, now: datetime | None = None) -> dict[str, Any]
 
 
 def _event_summary(event: AuditEvent) -> dict[str, Any]:
+    metadata = event.metadata if isinstance(event.metadata, dict) else {}
     return {
         "event_id": event.event_id,
         "event_type": event.event_type.value,
@@ -204,6 +294,18 @@ def _event_summary(event: AuditEvent) -> dict[str, Any]:
         "redacted_preview": event.redacted_preview,
         "raw_sha256": event.raw_sha256,
         "created_at": event.created_at,
+        "stage_id": str(metadata.get("stage_id", "")),
+        "grant_id": str(metadata.get("grant_id", "")),
+        "tool_name": str(metadata.get("tool_name", "")),
+        "operator_id": str(
+            metadata.get("approved_by")
+            or metadata.get("actor_id")
+            or metadata.get("operator_id")
+            or ""
+        ),
+        "operator_reason": _safe_operator_text(str(metadata.get("operator_reason", ""))),
+        "policy_version": str(metadata.get("policy_version", "")),
+        "expires_at": str(metadata.get("expires_at", "")),
     }
 
 
@@ -217,7 +319,7 @@ def _check_summary(item: dict[str, Any]) -> dict[str, str]:
     }
 
 
-def _append_stage_denied_event(audit_store: AuditStore, record: Any) -> None:
+def _append_stage_denied_event(audit_store: AuditStore, record: Any, *, reason: str = "") -> None:
     created_at = datetime.now(timezone.utc).isoformat()
     event_id = stable_hash(
         {
@@ -240,6 +342,7 @@ def _append_stage_denied_event(audit_store: AuditStore, record: Any) -> None:
                 "stage_id": record.stage_id,
                 "tool_name": record.tool_name,
                 "approved_by": record.approved_by,
+                "operator_reason": reason,
                 "status": record.status.value,
             },
         )
@@ -254,3 +357,33 @@ def _parse_time(value: str) -> datetime:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def _event_matches_stage(event: AuditEvent, *, stage_id: str, action_hash: str) -> bool:
+    metadata = event.metadata if isinstance(event.metadata, dict) else {}
+    return (
+        event.decision_id == stage_id
+        or event.action_id == action_hash
+        or str(metadata.get("stage_id", "")) == stage_id
+        or str(metadata.get("request_id", "")) == stage_id
+    )
+
+
+def _with_evidence_hash(bundle: dict[str, Any]) -> dict[str, Any]:
+    evidence_hash = stable_hash(bundle)
+    return {
+        **bundle,
+        "integrity": {
+            "hash_algorithm": "sha256:stable_json",
+            "evidence_sha256": evidence_hash,
+        },
+    }
+
+
+def _safe_operator_text(value: str, *, limit: int = MAX_OPERATOR_REASON) -> str:
+    redacted = " ".join(str(value).split())
+    for name, pattern in SECRET_PATTERNS:
+        redacted = pattern.sub(f"[REDACTED:{name}]", redacted)
+    if len(redacted) > limit:
+        return f"{redacted[:limit]}..."
+    return redacted
