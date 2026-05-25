@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from enterprise.access import AccessGrantStore
+from enterprise.assignments import AgentAssignmentStore, assignment_counts, assignment_to_summary
 from enterprise.audit import AuditStore
 from enterprise.contracts import AuditEvent, AuditEventType, StageStatus, stable_hash
 from enterprise.doctor import run_enterprise_doctor
@@ -22,6 +23,7 @@ def build_enterprise_console_snapshot(
     audit_store: AuditStore | None = None,
     stage_store: StageStore | None = None,
     access_grant_store: AccessGrantStore | None = None,
+    assignment_store: AgentAssignmentStore | None = None,
     recent_limit: int = 25,
     now: datetime | None = None,
 ) -> dict[str, Any]:
@@ -30,6 +32,7 @@ def build_enterprise_console_snapshot(
     audit = audit_store or AuditStore()
     stages = stage_store or StageStore()
     grants = access_grant_store or AccessGrantStore()
+    assignments = assignment_store or AgentAssignmentStore()
     current_time = now or datetime.now(timezone.utc)
     config = root_config or {}
     enterprise_cfg = config.get("enterprise", {}) if isinstance(config, dict) else {}
@@ -38,11 +41,13 @@ def build_enterprise_console_snapshot(
 
     records = stages.list_records()
     grant_rows = grants.list_grants()
+    assignment_rows = assignments.list()
     events = audit.list_events()
     doctor = run_enterprise_doctor(root_config=config)
 
     status_counts = _stage_counts(records)
     grant_counts = _grant_counts(grant_rows, now=current_time)
+    assignment_status_counts = assignment_counts(assignment_rows, now=current_time)
     controls = doctor.to_dict()
     check_rows = list(controls.get("checks", [])) if isinstance(controls.get("checks"), list) else []
 
@@ -64,6 +69,11 @@ def build_enterprise_console_snapshot(
             "grants_active": grant_counts["active"],
             "grants_revoked": grant_counts["revoked"],
             "grants_expired": grant_counts["expired"],
+            "assignments_total": assignment_status_counts["total"],
+            "assignments_active": assignment_status_counts["active"],
+            "assignments_paused": assignment_status_counts["paused"],
+            "assignments_revoked": assignment_status_counts["revoked"],
+            "assignments_expired": assignment_status_counts["expired"],
             "audit_total": len(events),
             "doctor_pass": sum(1 for item in check_rows if item.get("status") == "pass"),
             "doctor_warn": sum(1 for item in check_rows if item.get("status") == "warn"),
@@ -77,6 +87,10 @@ def build_enterprise_console_snapshot(
         "recent_grants": [_grant_summary(grant, now=current_time) for grant in reversed(grant_rows)][
             :recent_limit
         ],
+        "recent_assignments": [
+            assignment_to_summary(record, now=current_time)
+            for record in reversed(assignment_rows)
+        ][:recent_limit],
         "recent_events": [_event_summary(event) for event in reversed(events)][
             :recent_limit
         ],
@@ -141,6 +155,7 @@ def build_enterprise_evidence_bundle(
     audit_store: AuditStore | None = None,
     stage_store: StageStore | None = None,
     access_grant_store: AccessGrantStore | None = None,
+    assignment_store: AgentAssignmentStore | None = None,
     recent_limit: int = 100,
     now: datetime | None = None,
 ) -> dict[str, Any]:
@@ -149,6 +164,7 @@ def build_enterprise_evidence_bundle(
     audit = audit_store or AuditStore()
     stages = stage_store or StageStore()
     grants = access_grant_store or AccessGrantStore()
+    assignments = assignment_store or AgentAssignmentStore()
     current_time = now or datetime.now(timezone.utc)
     events = audit.list_events()
     grant_rows = grants.list_grants()
@@ -187,6 +203,7 @@ def build_enterprise_evidence_bundle(
                     audit_store=audit,
                     stage_store=stages,
                     access_grant_store=grants,
+                    assignment_store=assignments,
                     recent_limit=1,
                     now=current_time,
                 )["doctor"],
@@ -198,6 +215,7 @@ def build_enterprise_evidence_bundle(
         audit_store=audit,
         stage_store=stages,
         access_grant_store=grants,
+        assignment_store=assignments,
         recent_limit=recent_limit,
         now=current_time,
     )

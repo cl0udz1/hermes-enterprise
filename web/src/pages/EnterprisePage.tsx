@@ -11,7 +11,9 @@ import {
   RefreshCw,
   Shield,
   UserCheck,
+  UserPlus,
   UserRound,
+  Users,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -23,6 +25,8 @@ import { Input } from "@/components/ui/input";
 import { H2 } from "@/components/NouiTypography";
 import { api } from "@/lib/api";
 import type {
+  EnterpriseAssignmentSummary,
+  EnterpriseAssignmentsResponse,
   EnterpriseApprovalSummary,
   EnterpriseAuditEventSummary,
   EnterpriseConsoleResponse,
@@ -58,6 +62,13 @@ function statusTone(status: string): "success" | "warning" | "destructive" | "se
 function compactList(values: string[], fallback = "-"): string {
   if (!values.length) return fallback;
   return values.slice(0, 3).join(", ") + (values.length > 3 ? ` +${values.length - 3}` : "");
+}
+
+function parseList(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function formatSafeValue(value: unknown): string {
@@ -97,21 +108,45 @@ function defaultOperatorId(): string {
 
 export default function EnterprisePage() {
   const [snapshot, setSnapshot] = useState<EnterpriseConsoleResponse | null>(null);
+  const [assignments, setAssignments] = useState<EnterpriseAssignmentsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyStage, setBusyStage] = useState<string | null>(null);
+  const [busyAssignment, setBusyAssignment] = useState<string | null>(null);
   const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
   const [operatorId, setOperatorId] = useState(defaultOperatorId);
   const [approvalReason, setApprovalReason] = useState("");
   const [ttlMinutes, setTtlMinutes] = useState(30);
+  const [assignmentSubject, setAssignmentSubject] = useState("");
+  const [assignmentAgent, setAssignmentAgent] = useState("");
+  const [assignmentProfile, setAssignmentProfile] = useState("default");
+  const [assignmentRole, setAssignmentRole] = useState("employee");
+  const [assignmentReason, setAssignmentReason] = useState("");
+  const [assignmentSurfaces, setAssignmentSurfaces] = useState("dashboard, cli, tui, gateway");
+  const [assignmentWorkspace, setAssignmentWorkspace] = useState("");
   const { toast, showToast } = useToast();
   const { setAfterTitle, setEnd } = usePageHeader();
 
   const load = useCallback(() => {
     setLoading(true);
-    api
-      .getEnterpriseConsole()
-      .then(setSnapshot)
-      .catch((err) => showToast(`Enterprise console failed: ${err}`, "error"))
+    Promise.allSettled([
+      api.getEnterpriseConsole(),
+      api.getEnterpriseAssignments(),
+    ])
+      .then(([consoleResult, assignmentResult]) => {
+        if (consoleResult.status === "fulfilled") {
+          setSnapshot(consoleResult.value);
+        } else {
+          showToast(`Enterprise console failed: ${consoleResult.reason}`, "error");
+        }
+        if (assignmentResult.status === "fulfilled") {
+          setAssignments(assignmentResult.value);
+          if (!assignmentProfile && assignmentResult.value.profiles[0]?.name) {
+            setAssignmentProfile(assignmentResult.value.profiles[0].name);
+          }
+        } else {
+          showToast(`Assignments failed: ${assignmentResult.reason}`, "error");
+        }
+      })
       .finally(() => setLoading(false));
   }, [showToast]);
 
@@ -254,6 +289,59 @@ export default function EnterprisePage() {
     }
   };
 
+  const createAssignment = async () => {
+    const subject = assignmentSubject.trim();
+    const agent = assignmentAgent.trim();
+    const reason = assignmentReason.trim();
+    const operator = operatorId.trim() || "dashboard-operator";
+    if (!subject || !agent || !reason) {
+      showToast("Subject, agent, and assignment reason are required", "error");
+      return;
+    }
+    setBusyAssignment("create");
+    try {
+      window.localStorage.setItem("hermes.enterprise.operator", operator);
+      await api.createEnterpriseAssignment({
+        subject_id: subject,
+        agent_id: agent,
+        profile_id: assignmentProfile || "default",
+        role: assignmentRole,
+        assigned_by: operator,
+        assignment_reason: reason,
+        allowed_surfaces: parseList(assignmentSurfaces),
+        workspace_scope: parseList(assignmentWorkspace),
+        tool_policy: [],
+        memory_scope: [],
+      });
+      showToast(`Assigned ${agent} to ${subject}`, "success");
+      setAssignmentSubject("");
+      setAssignmentAgent("");
+      setAssignmentReason("");
+      setAssignmentWorkspace("");
+      load();
+    } catch (err) {
+      showToast(`Assignment failed: ${err}`, "error");
+    } finally {
+      setBusyAssignment(null);
+    }
+  };
+
+  const revokeAssignment = async (assignment: EnterpriseAssignmentSummary) => {
+    const operator = operatorId.trim() || "dashboard-operator";
+    setBusyAssignment(assignment.assignment_id);
+    try {
+      await api.revokeEnterpriseAssignment(assignment.assignment_id, {
+        revoked_by: operator,
+      });
+      showToast(`Revoked ${assignment.agent_id}`, "success");
+      load();
+    } catch (err) {
+      showToast(`Revoke failed: ${err}`, "error");
+    } finally {
+      setBusyAssignment(null);
+    }
+  };
+
   if (loading && !snapshot) {
     return (
       <div className="flex items-center justify-center py-24">
@@ -269,7 +357,7 @@ export default function EnterprisePage() {
 
       {snapshot && (
         <>
-          <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <MetricCard
               icon={Shield}
               label="Enterprise mode"
@@ -290,6 +378,13 @@ export default function EnterprisePage() {
               value={String(snapshot.counts.grants_active)}
               tone={snapshot.counts.grants_active > 0 ? "success" : "secondary"}
               badge={snapshot.counts.grants_active > 0 ? "active" : "none"}
+            />
+            <MetricCard
+              icon={Users}
+              label="Active assignments"
+              value={String(snapshot.counts.assignments_active)}
+              tone={snapshot.counts.assignments_active > 0 ? "success" : "secondary"}
+              badge={snapshot.counts.assignments_active > 0 ? "assigned" : "none"}
             />
             <MetricCard
               icon={Activity}
@@ -322,6 +417,28 @@ export default function EnterprisePage() {
               onExport={exportEvidence}
             />
           </div>
+
+          <AssignmentControl
+            data={assignments}
+            busyAssignment={busyAssignment}
+            operatorId={operatorId}
+            subject={assignmentSubject}
+            agent={assignmentAgent}
+            profile={assignmentProfile}
+            role={assignmentRole}
+            reason={assignmentReason}
+            surfaces={assignmentSurfaces}
+            workspace={assignmentWorkspace}
+            onSubjectChange={setAssignmentSubject}
+            onAgentChange={setAssignmentAgent}
+            onProfileChange={setAssignmentProfile}
+            onRoleChange={setAssignmentRole}
+            onReasonChange={setAssignmentReason}
+            onSurfacesChange={setAssignmentSurfaces}
+            onWorkspaceChange={setAssignmentWorkspace}
+            onCreate={createAssignment}
+            onRevoke={revokeAssignment}
+          />
 
           <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-3">
             <ControlHealth
@@ -611,6 +728,216 @@ function ApprovalInspector({
           </>
         )}
       </Card>
+    </section>
+  );
+}
+
+function AssignmentControl({
+  data,
+  busyAssignment,
+  operatorId,
+  subject,
+  agent,
+  profile,
+  role,
+  reason,
+  surfaces,
+  workspace,
+  onSubjectChange,
+  onAgentChange,
+  onProfileChange,
+  onRoleChange,
+  onReasonChange,
+  onSurfacesChange,
+  onWorkspaceChange,
+  onCreate,
+  onRevoke,
+}: {
+  data: EnterpriseAssignmentsResponse | null;
+  busyAssignment: string | null;
+  operatorId: string;
+  subject: string;
+  agent: string;
+  profile: string;
+  role: string;
+  reason: string;
+  surfaces: string;
+  workspace: string;
+  onSubjectChange: (value: string) => void;
+  onAgentChange: (value: string) => void;
+  onProfileChange: (value: string) => void;
+  onRoleChange: (value: string) => void;
+  onReasonChange: (value: string) => void;
+  onSurfacesChange: (value: string) => void;
+  onWorkspaceChange: (value: string) => void;
+  onCreate: () => void;
+  onRevoke: (assignment: EnterpriseAssignmentSummary) => void;
+}) {
+  const assignments = data?.assignments ?? [];
+  const profiles = data?.profiles ?? [];
+  const control = data?.control;
+  const ready = subject.trim() && agent.trim() && reason.trim();
+
+  return (
+    <section className="flex min-w-0 flex-col gap-3">
+      <H2 variant="sm" className="flex items-center gap-2 text-muted-foreground">
+        <UserPlus className="h-4 w-4" />
+        Agent assignments ({assignments.length})
+      </H2>
+
+      <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(360px,0.9fr)_minmax(0,1.1fr)]">
+        <Card className="min-w-0 overflow-hidden">
+          <CardHeader className="px-4 py-3">
+            <CardTitle className="flex flex-wrap items-center gap-2 text-sm">
+              <Badge tone="outline">{control?.subject.subject_id ?? "local-admin"}</Badge>
+              <span className="text-xs text-muted-foreground">
+                {(control?.subject.roles ?? ["admin"]).join(", ")}
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-3">
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="grid gap-1 text-xs text-muted-foreground">
+                Employee or team
+                <Input
+                  value={subject}
+                  onChange={(event) => onSubjectChange(event.target.value)}
+                  placeholder="employee:jane"
+                />
+              </label>
+              <label className="grid gap-1 text-xs text-muted-foreground">
+                Agent identity
+                <Input
+                  value={agent}
+                  onChange={(event) => onAgentChange(event.target.value)}
+                  placeholder="repo-coder"
+                />
+              </label>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-3">
+              <label className="grid gap-1 text-xs text-muted-foreground">
+                Backing profile
+                <select
+                  value={profile}
+                  onChange={(event) => onProfileChange(event.target.value)}
+                  className="h-9 w-full border border-border bg-background/40 px-3 text-sm text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  {(profiles.length ? profiles : [{ name: "default" } as { name: string }]).map((item) => (
+                    <option key={item.name} value={item.name}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="grid gap-1 text-xs text-muted-foreground">
+                Role
+                <select
+                  value={role}
+                  onChange={(event) => onRoleChange(event.target.value)}
+                  className="h-9 w-full border border-border bg-background/40 px-3 text-sm text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  <option value="employee">employee</option>
+                  <option value="manager">manager</option>
+                  <option value="operator">operator</option>
+                  <option value="auditor">auditor</option>
+                </select>
+              </label>
+              <label className="grid gap-1 text-xs text-muted-foreground">
+                Assigned by
+                <Input value={operatorId} readOnly />
+              </label>
+            </div>
+
+            <label className="grid gap-1 text-xs text-muted-foreground">
+              Allowed surfaces
+              <Input
+                value={surfaces}
+                onChange={(event) => onSurfacesChange(event.target.value)}
+                placeholder="dashboard, cli, tui, gateway"
+              />
+            </label>
+
+            <label className="grid gap-1 text-xs text-muted-foreground">
+              Workspace scope
+              <Input
+                value={workspace}
+                onChange={(event) => onWorkspaceChange(event.target.value)}
+                placeholder="repo:billing-api, jira:SEC"
+              />
+            </label>
+
+            <label className="grid gap-1 text-xs text-muted-foreground">
+              Assignment reason
+              <textarea
+                value={reason}
+                onChange={(event) => onReasonChange(event.target.value)}
+                placeholder="team, project, ticket, or review reason"
+                className="min-h-20 w-full resize-y border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+            </label>
+
+            <div className="flex justify-end">
+              <Button size="sm" onClick={onCreate} disabled={busyAssignment === "create" || !ready}>
+                {busyAssignment === "create" ? <Spinner /> : <UserPlus className="h-3 w-3" />}
+                Assign
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="min-w-0 overflow-hidden">
+          <CardContent className="p-0">
+            {assignments.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                No agent assignments.
+              </p>
+            ) : (
+              <div className="divide-y divide-border">
+                {assignments.map((assignment) => (
+                  <div key={assignment.assignment_id} className="grid gap-3 px-4 py-3">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <Badge tone={statusTone(assignment.status)}>{assignment.status}</Badge>
+                      <span className="truncate font-medium text-sm">
+                        {assignment.agent_id}
+                      </span>
+                      <Badge tone="outline">{assignment.profile_id}</Badge>
+                      <span className="ml-auto text-xs text-muted-foreground">
+                        {formatTime(assignment.created_at)}
+                      </span>
+                    </div>
+                    <dl className="grid min-w-0 gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+                      <KeyValue label="Subject" value={assignment.subject_id} />
+                      <KeyValue label="Role" value={assignment.role} />
+                      <KeyValue label="Surfaces" value={compactList(assignment.allowed_surfaces)} />
+                      <KeyValue label="Workspace" value={compactList(assignment.workspace_scope)} />
+                    </dl>
+                    {assignment.assignment_reason && (
+                      <p className="line-clamp-2 text-xs text-muted-foreground">
+                        {assignment.assigned_by}: {assignment.assignment_reason}
+                      </p>
+                    )}
+                    {assignment.status === "active" && (
+                      <div className="flex justify-end">
+                        <Button
+                          size="sm"
+                          outlined
+                          destructive
+                          onClick={() => onRevoke(assignment)}
+                          disabled={busyAssignment === assignment.assignment_id}
+                        >
+                          {busyAssignment === assignment.assignment_id ? <Spinner /> : <X className="h-3 w-3" />}
+                          Revoke
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </section>
   );
 }

@@ -170,6 +170,28 @@ export const api = {
       `/api/enterprise/evidence?${params.toString()}`,
     );
   },
+  getEnterpriseAssignments: (recentLimit = 100) =>
+    fetchJSON<EnterpriseAssignmentsResponse>(
+      `/api/enterprise/assignments?recent_limit=${recentLimit}`,
+    ),
+  createEnterpriseAssignment: (body: EnterpriseAssignmentCreate) =>
+    fetchJSON<{ ok: boolean; assignment: EnterpriseAssignmentSummary }>(
+      "/api/enterprise/assignments",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    ),
+  revokeEnterpriseAssignment: (assignmentId: string, body: { revoked_by: string }) =>
+    fetchJSON<{ ok: boolean; assignment: EnterpriseAssignmentSummary }>(
+      `/api/enterprise/assignments/${encodeURIComponent(assignmentId)}/revoke`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    ),
 
   // Cron jobs
   getCronJobs: (profile = "all") =>
@@ -648,6 +670,53 @@ export interface EnterpriseGrantSummary {
   status: "active" | "expired" | "revoked" | string;
 }
 
+export interface EnterpriseAssignmentSummary {
+  assignment_id: string;
+  subject_id: string;
+  agent_id: string;
+  profile_id: string;
+  role: string;
+  status: "active" | "paused" | "revoked" | "expired" | string;
+  assigned_by: string;
+  assignment_reason: string;
+  allowed_surfaces: string[];
+  workspace_scope: string[];
+  tool_policy: string[];
+  memory_scope: string[];
+  created_at: string;
+  expires_at: string;
+  revoked_at: string;
+}
+
+export interface EnterpriseAssignmentCreate {
+  subject_id: string;
+  agent_id: string;
+  profile_id: string;
+  role: string;
+  assigned_by: string;
+  assignment_reason: string;
+  allowed_surfaces: string[];
+  workspace_scope: string[];
+  tool_policy: string[];
+  memory_scope: string[];
+  expires_at?: string;
+}
+
+export interface EnterpriseAssignmentsResponse {
+  control: {
+    allowed: boolean;
+    capability: string;
+    reason: string;
+    subject: {
+      subject_id: string;
+      roles: string[];
+      source: string;
+    };
+  };
+  profiles: ProfileInfo[];
+  assignments: EnterpriseAssignmentSummary[];
+}
+
 export interface EnterpriseAuditEventSummary {
   event_id: string;
   event_type: string;
@@ -684,6 +753,11 @@ export interface EnterpriseConsoleResponse {
     grants_active: number;
     grants_revoked: number;
     grants_expired: number;
+    assignments_total: number;
+    assignments_active: number;
+    assignments_paused: number;
+    assignments_revoked: number;
+    assignments_expired: number;
     audit_total: number;
     doctor_pass: number;
     doctor_warn: number;
@@ -691,6 +765,7 @@ export interface EnterpriseConsoleResponse {
   };
   pending_approvals: EnterpriseApprovalSummary[];
   recent_grants: EnterpriseGrantSummary[];
+  recent_assignments: EnterpriseAssignmentSummary[];
   recent_events: EnterpriseAuditEventSummary[];
 }
 
