@@ -2545,6 +2545,63 @@ async def get_logs(
 
 
 # ---------------------------------------------------------------------------
+# Enterprise operator console endpoints
+# ---------------------------------------------------------------------------
+
+
+class EnterpriseApprovalApprove(BaseModel):
+    approved_by: str = "dashboard-operator"
+    ttl_minutes: int = 30
+    policy_version: str = "dashboard"
+
+
+class EnterpriseApprovalDeny(BaseModel):
+    denied_by: str = "dashboard-operator"
+
+
+@app.get("/api/enterprise/console")
+async def get_enterprise_console(recent_limit: int = 25):
+    from enterprise.console import build_enterprise_console_snapshot
+
+    limit = max(1, min(int(recent_limit), 100))
+    return build_enterprise_console_snapshot(
+        root_config=load_config(),
+        recent_limit=limit,
+    )
+
+
+@app.post("/api/enterprise/approvals/{stage_id}/approve")
+async def approve_enterprise_approval(stage_id: str, body: EnterpriseApprovalApprove):
+    from enterprise.console import approve_console_stage
+
+    try:
+        return approve_console_stage(
+            stage_id,
+            approved_by=body.approved_by,
+            ttl_minutes=body.ttl_minutes,
+            policy_version=body.policy_version,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Staged action not found")
+    except Exception as e:
+        _log.exception("POST /api/enterprise/approvals/%s/approve failed", stage_id)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/enterprise/approvals/{stage_id}/deny")
+async def deny_enterprise_approval(stage_id: str, body: EnterpriseApprovalDeny):
+    from enterprise.console import deny_console_stage
+
+    try:
+        return deny_console_stage(stage_id, denied_by=body.denied_by)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Staged action not found")
+    except Exception as e:
+        _log.exception("POST /api/enterprise/approvals/%s/deny failed", stage_id)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
 # Cron job management endpoints
 # ---------------------------------------------------------------------------
 

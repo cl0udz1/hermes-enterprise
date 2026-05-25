@@ -137,6 +137,33 @@ export const api = {
     });
   },
 
+  // Enterprise operator console
+  getEnterpriseConsole: (recentLimit = 25) =>
+    fetchJSON<EnterpriseConsoleResponse>(
+      `/api/enterprise/console?recent_limit=${recentLimit}`,
+    ),
+  approveEnterpriseApproval: (
+    stageId: string,
+    body: { approved_by: string; ttl_minutes?: number; policy_version?: string },
+  ) =>
+    fetchJSON<{ ok: boolean; grant: EnterpriseGrantSummary }>(
+      `/api/enterprise/approvals/${encodeURIComponent(stageId)}/approve`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    ),
+  denyEnterpriseApproval: (stageId: string, body: { denied_by: string }) =>
+    fetchJSON<{ ok: boolean; stage: EnterpriseApprovalSummary }>(
+      `/api/enterprise/approvals/${encodeURIComponent(stageId)}/deny`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    ),
+
   // Cron jobs
   getCronJobs: (profile = "all") =>
     fetchJSON<CronJob[]>(`/api/cron/jobs?profile=${encodeURIComponent(profile)}`),
@@ -569,6 +596,88 @@ export interface CronJob {
   last_run_at?: string | null;
   next_run_at?: string | null;
   last_error?: string | null;
+}
+
+export interface EnterpriseDoctorCheck {
+  name: string;
+  label: string;
+  status: "pass" | "warn" | "fail" | string;
+  detail: string;
+  remediation: string;
+}
+
+export interface EnterpriseApprovalSummary {
+  stage_id: string;
+  action_hash: string;
+  subject_id: string;
+  tool_name: string;
+  preview_uri: string;
+  idempotency_key: string;
+  status: string;
+  created_at: string;
+  approved_by: string;
+  risk_tier: string;
+  outcome: string;
+  detectors: string[];
+  requested_side_effects: string[];
+  safe_args: Record<string, unknown>;
+  arg_keys: string[];
+}
+
+export interface EnterpriseGrantSummary {
+  grant_id: string;
+  request_id: string;
+  subject_id: string;
+  resource: string;
+  actions: string[];
+  expires_at: string;
+  policy_version: string;
+  created_at: string;
+  revoked_at: string;
+  approved_by: string;
+  stage_id: string;
+  action_hash: string;
+  tool_name: string;
+  status: "active" | "expired" | "revoked" | string;
+}
+
+export interface EnterpriseAuditEventSummary {
+  event_id: string;
+  event_type: string;
+  subject_id: string;
+  action_id: string;
+  decision_id: string;
+  redacted_preview: string;
+  raw_sha256: string;
+  created_at: string;
+}
+
+export interface EnterpriseConsoleResponse {
+  enabled: boolean;
+  mode: string;
+  doctor: {
+    overall: "pass" | "warn" | "fail" | string;
+    enabled: boolean;
+    mode: string;
+    checks: EnterpriseDoctorCheck[];
+  };
+  counts: {
+    staged_total: number;
+    approvals_pending: number;
+    approvals_approved: number;
+    approvals_denied: number;
+    grants_total: number;
+    grants_active: number;
+    grants_revoked: number;
+    grants_expired: number;
+    audit_total: number;
+    doctor_pass: number;
+    doctor_warn: number;
+    doctor_fail: number;
+  };
+  pending_approvals: EnterpriseApprovalSummary[];
+  recent_grants: EnterpriseGrantSummary[];
+  recent_events: EnterpriseAuditEventSummary[];
 }
 
 export interface SkillInfo {
