@@ -20,6 +20,7 @@ from enterprise.contracts import (
     stable_json,
 )
 from enterprise.staging import StageStore
+from enterprise.triage.detectors import SECRET_PATTERNS
 from hermes_constants import get_hermes_home
 
 
@@ -166,6 +167,7 @@ class AccessGrantStore:
         expires_at: str | None = None,
         ttl_minutes: int = 30,
         policy_version: str = "local",
+        reason: str = "",
         audit_store: AuditStore | None = None,
     ) -> AccessGrant:
         stages = stage_store or StageStore()
@@ -181,7 +183,12 @@ class AccessGrantStore:
         )
         self.upsert_grant(grant)
         stages.set_status(stage_id, StageStatus.APPROVED, approved_by=approved_by)
-        _append_grant_event(audit_store or AuditStore(), grant, event_type=AuditEventType.ACTION_APPROVED)
+        _append_grant_event(
+            audit_store or AuditStore(),
+            grant,
+            event_type=AuditEventType.ACTION_APPROVED,
+            reason=reason,
+        )
         return grant
 
     def revoke_grant(
@@ -272,6 +279,7 @@ def _append_grant_event(
     *,
     event_type: AuditEventType,
     actor_id: str = "",
+    reason: str = "",
 ) -> tuple[str, ...]:
     created_at = datetime.now(timezone.utc).isoformat()
     event_id = stable_hash(
@@ -295,6 +303,8 @@ def _append_grant_event(
     }
     if actor_id:
         metadata["actor_id"] = actor_id
+    if reason:
+        metadata["operator_reason"] = _safe_operator_text(reason)
     audit_store.append_event(
         AuditEvent(
             event_id=event_id,
@@ -309,6 +319,15 @@ def _append_grant_event(
         )
     )
     return (event_id,)
+
+
+def _safe_operator_text(value: str, *, limit: int = 500) -> str:
+    redacted = " ".join(str(value).split())
+    for name, pattern in SECRET_PATTERNS:
+        redacted = pattern.sub(f"[REDACTED:{name}]", redacted)
+    if len(redacted) > limit:
+        return f"{redacted[:limit]}..."
+    return redacted
 
 
 def grants_for_action(

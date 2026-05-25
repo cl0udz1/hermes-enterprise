@@ -2553,10 +2553,12 @@ class EnterpriseApprovalApprove(BaseModel):
     approved_by: str = "dashboard-operator"
     ttl_minutes: int = 30
     policy_version: str = "dashboard"
+    reason: str = ""
 
 
 class EnterpriseApprovalDeny(BaseModel):
     denied_by: str = "dashboard-operator"
+    reason: str = ""
 
 
 @app.get("/api/enterprise/console")
@@ -2570,6 +2572,21 @@ async def get_enterprise_console(recent_limit: int = 25):
     )
 
 
+@app.get("/api/enterprise/evidence")
+async def get_enterprise_evidence(stage_id: Optional[str] = None, recent_limit: int = 100):
+    from enterprise.console import build_enterprise_evidence_bundle
+
+    limit = max(1, min(int(recent_limit), 250))
+    try:
+        return build_enterprise_evidence_bundle(
+            stage_id=stage_id,
+            root_config=load_config(),
+            recent_limit=limit,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Staged action not found")
+
+
 @app.post("/api/enterprise/approvals/{stage_id}/approve")
 async def approve_enterprise_approval(stage_id: str, body: EnterpriseApprovalApprove):
     from enterprise.console import approve_console_stage
@@ -2580,6 +2597,7 @@ async def approve_enterprise_approval(stage_id: str, body: EnterpriseApprovalApp
             approved_by=body.approved_by,
             ttl_minutes=body.ttl_minutes,
             policy_version=body.policy_version,
+            reason=body.reason,
         )
     except KeyError:
         raise HTTPException(status_code=404, detail="Staged action not found")
@@ -2593,7 +2611,7 @@ async def deny_enterprise_approval(stage_id: str, body: EnterpriseApprovalDeny):
     from enterprise.console import deny_console_stage
 
     try:
-        return deny_console_stage(stage_id, denied_by=body.denied_by)
+        return deny_console_stage(stage_id, denied_by=body.denied_by, reason=body.reason)
     except KeyError:
         raise HTTPException(status_code=404, detail="Staged action not found")
     except Exception as e:

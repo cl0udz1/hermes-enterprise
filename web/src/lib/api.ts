@@ -144,7 +144,7 @@ export const api = {
     ),
   approveEnterpriseApproval: (
     stageId: string,
-    body: { approved_by: string; ttl_minutes?: number; policy_version?: string },
+    body: { approved_by: string; ttl_minutes?: number; policy_version?: string; reason?: string },
   ) =>
     fetchJSON<{ ok: boolean; grant: EnterpriseGrantSummary }>(
       `/api/enterprise/approvals/${encodeURIComponent(stageId)}/approve`,
@@ -154,7 +154,7 @@ export const api = {
         body: JSON.stringify(body),
       },
     ),
-  denyEnterpriseApproval: (stageId: string, body: { denied_by: string }) =>
+  denyEnterpriseApproval: (stageId: string, body: { denied_by: string; reason?: string }) =>
     fetchJSON<{ ok: boolean; stage: EnterpriseApprovalSummary }>(
       `/api/enterprise/approvals/${encodeURIComponent(stageId)}/deny`,
       {
@@ -163,6 +163,13 @@ export const api = {
         body: JSON.stringify(body),
       },
     ),
+  getEnterpriseEvidence: (stageId?: string, recentLimit = 100) => {
+    const params = new URLSearchParams({ recent_limit: String(recentLimit) });
+    if (stageId) params.set("stage_id", stageId);
+    return fetchJSON<EnterpriseEvidenceBundle>(
+      `/api/enterprise/evidence?${params.toString()}`,
+    );
+  },
 
   // Cron jobs
   getCronJobs: (profile = "all") =>
@@ -650,6 +657,13 @@ export interface EnterpriseAuditEventSummary {
   redacted_preview: string;
   raw_sha256: string;
   created_at: string;
+  stage_id: string;
+  grant_id: string;
+  tool_name: string;
+  operator_id: string;
+  operator_reason: string;
+  policy_version: string;
+  expires_at: string;
 }
 
 export interface EnterpriseConsoleResponse {
@@ -678,6 +692,26 @@ export interface EnterpriseConsoleResponse {
   pending_approvals: EnterpriseApprovalSummary[];
   recent_grants: EnterpriseGrantSummary[];
   recent_events: EnterpriseAuditEventSummary[];
+}
+
+export interface EnterpriseEvidenceBundle {
+  schema_version: number;
+  scope: "stage" | "console" | string;
+  exported_at: string;
+  redaction: {
+    raw_payloads_excluded: boolean;
+    operator_text_redacted: boolean;
+    raw_hashes_retained: boolean;
+  };
+  integrity: {
+    hash_algorithm: string;
+    evidence_sha256: string;
+  };
+  stage?: EnterpriseApprovalSummary;
+  grants?: EnterpriseGrantSummary[];
+  events?: EnterpriseAuditEventSummary[];
+  doctor?: EnterpriseConsoleResponse["doctor"];
+  snapshot?: EnterpriseConsoleResponse;
 }
 
 export interface SkillInfo {
