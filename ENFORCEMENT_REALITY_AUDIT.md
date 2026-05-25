@@ -104,6 +104,10 @@ Hermes authority seams patched so far:
     denial for sensitive payloads.
 13. `agent/codex_runtime.py` Codex Responses streaming request denial for
     sensitive payloads.
+14. `gateway/run.py` gateway identity evaluation and subject binding before
+    dispatch.
+15. `cron/scheduler.py` cron owner, intent, expiry, and policy-context
+    evaluation before scheduled execution.
 
 ## Current Hermes Authority Surfaces
 
@@ -118,8 +122,10 @@ surfaces:
 | Memory | Memory Manager payloads pass through the enterprise memory-governance guard when enterprise mode is enabled. | Extend to tenant-scoped memory isolation, provider-specific recall ACLs, semantic classification, and durable quarantine workflow. |
 | Plugins | Enterprise mode checks plugin admission before enabled plugins import and before plugin tools register. | Extend to memory/model-provider plugin discovery, signature/provenance verification, and plugin runtime sandboxing. |
 | MCP | Enterprise mode checks MCP server admission before startup and MCP tool admission before registration. | Add dynamic revocation for already-running servers, richer remote-server provenance, and per-tool risk manifests. |
-| Gateway | Hermes exposes messaging/platform authority. | Add identity binding and assignment policy. |
-| Cron | Hermes can run scheduled work. | Add owner, intent, expiry, and policy wrapper. |
+| Gateway | Gateway events pass through enterprise identity binding and assignment policy before dispatch when enterprise mode is enabled. | Extend to SSO/SCIM lifecycle, role policy, admin assignment UI, and richer per-channel authorization. |
+| Cron | Scheduled jobs pass through owner, intent, expiry, and policy-context governance before execution when enterprise mode is enabled. | Extend to admin-managed job approvals, recurrence policy, schedule drift review, and dashboard visibility. |
+| Access grants | Staged approval-required actions can be approved into scoped, expiring grants bound to subject, tool, and action hash. | Add approval queue API/UI, multi-approver policy, and approved execution workflow. |
+| Secrets | The fake Secret Broker issues opaque, short-lived credential references only after a valid secret-issue grant. | Replace fake provider with real vault/KMS adapters and rotation/revocation integration. |
 | Artifacts | Enterprise artifact vault and hydration boundary exist as v0 modules. | Wire provider, memory, support bundle, and workflow paths through hydration in later slices. |
 
 ## Current Hermes Files Touched
@@ -141,9 +147,15 @@ surfaces:
 | `agent/memory_manager.py` | Route memory write/read payloads through the enterprise memory-governance guard. | Sanitizes governed memory provider inputs and recalled memory outputs when enterprise mode is enabled. |
 | `hermes_cli/plugins.py` | Route enabled plugin imports and plugin tool registrations through enterprise admission checks. | Quarantines unapproved plugins and unmanifested plugin-provided tools before they become active authority in enterprise mode. |
 | `tools/mcp_tool.py` | Route MCP server startup and discovered tool registration through enterprise admission checks. | Quarantines unapproved MCP servers before connection and undeclared MCP tools before registry exposure in enterprise mode. |
+| `gateway/run.py` | Route gateway source identity through enterprise subject assignment before event dispatch. | Denies unmapped gateway users/channels and binds mapped subjects to downstream action-firewall decisions in enterprise mode. |
+| `cron/scheduler.py` | Route scheduled jobs through enterprise cron governance before agent execution. | Denies jobs missing owner, intent, expiry, or valid policy context and binds approved cron owner context to the agent in enterprise mode. |
 | `enterprise/provider_egress.py` | Define deterministic provider request egress governance, route coverage, sensitive streaming denial, and audit emission. | Enforces covered provider payload boundaries when called by transports, auxiliary calls, or streaming request seams. |
 | `enterprise/memory_governance.py` | Define deterministic memory payload governance and audit emission. | Enforces memory payload boundaries when called by Memory Manager. |
 | `enterprise/admission.py` | Define deterministic plugin and MCP admission decisions and audit emission. | Enforces plugin/MCP admission when called by plugin and MCP runtime seams. |
+| `enterprise/gateway_identity.py` | Define deterministic gateway subject binding and redacted identity audit events. | Enforces mapped platform-user/channel assignments when called by the gateway runtime seam. |
+| `enterprise/cron_governance.py` | Define deterministic cron intent envelopes and redacted governance decisions. | Enforces owner, intent, expiry, and policy-context requirements when called by the scheduler seam. |
+| `enterprise/access.py` | Store, approve, revoke, and look up scoped access grants for staged actions. | Allows exact approved action hashes through the action firewall and fails closed for changed, expired, or revoked grants. |
+| `enterprise/secrets.py` | Define fake Secret Broker issuance behind secret-issue grants and opaque credential references. | Proves short-lived credential lifecycle without exposing raw secrets or claiming real vault/KMS integration. |
 | `enterprise/sanitization.py` | Share deterministic secret and prompt-control sanitizers across result and provider boundaries. | No direct authority until called by a runtime boundary. |
 | `enterprise/firewall/action.py` | Feed observed sandbox side effects into triage, apply developer local fast path, and emit sandbox/staging audit events. | Enforces manifest/profile mismatch checks and audited local fast-path decisions inside the existing action firewall path. |
 | `enterprise/sandbox/*` | Define sandbox profiles and v0 observed-intent enforcement. | No direct runtime authority until called by the action firewall. |
@@ -157,6 +169,7 @@ surfaces:
 | `scripts/enterprise_mvp0_gate.py` | Run the repeatable MVP-0 release gate locally and in CI. | Test/CI only; no runtime authority. |
 | `.github/workflows/enterprise-mvp0-gate.yml` | Run the MVP-0 release gate for `enterprise/main`. | CI only; no runtime authority. |
 | `ENTERPRISE_MVP0_READINESS.md` | State MVP-0 claim boundaries and release evidence. | Documentation only. |
+| `ENTERPRISE_MVP1_READINESS.md` | State MVP-1 claim boundaries, closure evidence, and next milestone direction. | Documentation only. |
 
 ## Controls Not Yet Implemented
 
@@ -188,9 +201,9 @@ These are not real yet:
     deterministic secret-bearing streaming requests instead of buffering and
     scanning response deltas.
 
-## First Enforcement Claims Allowed After MVP-0
+## Current Enforcement Claims Allowed
 
-MVP-0 may claim only what is implemented and tested:
+MVP-0 and MVP-1 may claim only what is implemented and tested:
 
 1. Enterprise mode exists and is disabled by default.
 2. Covered local tool calls pass through an action firewall.
@@ -214,14 +227,23 @@ MVP-0 may claim only what is implemented and tested:
     action arguments, fake secret handling, and enterprise-off compatibility.
 14. MVP-0 has a repeatable local and CI gate command for enterprise release
     checks on the downstream `enterprise/main` branch.
-15. Covered provider request payloads for Chat Completions, Codex Responses,
+15. Covered Memory Manager read/write paths pass through deterministic memory
+    governance.
+16. Unapproved plugins, unmanifested plugin tools, unapproved MCP servers, and
+    undeclared MCP tools are quarantined before registry exposure in enterprise
+    mode.
+17. Gateway events can be bound to enterprise subjects through assignment
+    policy, and unmapped gateway users/channels fail closed.
+18. Cron jobs can be denied before execution when owner, intent, expiry, or
+    policy context is missing or invalid.
+19. Covered provider request payloads for Chat Completions, Codex Responses,
     Anthropic Messages, Bedrock Converse, and auxiliary model calls are
     sanitized before provider submission in enterprise mode.
-16. Deterministic secret-bearing streaming provider requests are denied by
+20. Deterministic secret-bearing streaming provider requests are denied by
     policy instead of claiming streamed response scanning.
-17. Access grants are scoped to staged action hashes and fail closed after
+21. Access grants are scoped to staged action hashes and fail closed after
     action changes, expiry, or revocation.
-18. Fake Secret Broker issues only opaque short-lived credential references
+22. Fake Secret Broker issues only opaque short-lived credential references
     after a valid access grant; real vault/KMS integration is not claimed.
 
 ## Bypass Classes To Track
@@ -543,3 +565,115 @@ MVP-1 Plugin/MCP Admission v0 evidence:
 9. Verification:
    `python scripts\enterprise_mvp0_gate.py` passed locally with 86 enterprise
    tests and 15 targeted Hermes authority-seam tests after this slice.
+
+MVP-1 Gateway Identity v0 evidence:
+
+1. Enforcement point: `gateway/run.py` evaluates enterprise gateway identity
+   before dispatch and binds the enterprise subject onto the event and source.
+2. Enterprise module: `enterprise/gateway_identity.py` maps platform, user, and
+   channel inputs to `GatewaySubjectBinding` records and emits
+   `gateway_identity_decision` audit events without raw platform identifiers.
+3. Enterprise-off gate:
+   `tests/enterprise/test_gateway_identity.py::test_gateway_identity_disabled_is_noop`
+   proves disabled enterprise mode allows normal gateway flow and does not
+   audit.
+4. Enterprise-on gates:
+   `tests/enterprise/test_gateway_identity.py::test_gateway_identity_binds_assignment_and_audits_without_raw_ids`,
+   `tests/enterprise/test_gateway_identity.py::test_gateway_identity_denies_unmapped_subject`,
+   `tests/enterprise/test_gateway_identity.py::test_action_firewall_prefers_enterprise_gateway_subject`,
+   and
+   `tests/enterprise/test_gateway_identity.py::test_action_firewall_falls_back_to_private_gateway_user_id`
+   prove mapped subjects bind correctly, unmapped subjects fail closed, and the
+   action firewall prefers the enterprise subject over raw platform IDs.
+5. Doctor evidence:
+   `tests/enterprise/test_enterprise_doctor.py` includes the
+   `gateway_identity` diagnostic check.
+6. Explicit limitation: this is assignment binding, not full SSO, SCIM,
+   organization lifecycle, RBAC, or admin UI.
+
+MVP-1 Cron Governance v0 evidence:
+
+1. Enforcement point: `cron/scheduler.py` evaluates enterprise cron governance
+   before scheduled execution and binds approved owner context to the agent.
+2. Enterprise module: `enterprise/cron_governance.py` validates owner, intent,
+   expiry, and policy-context metadata and emits `cron_governance_decision`
+   audit events with hashed intent data.
+3. Enterprise-off gate:
+   `tests/enterprise/test_cron_governance.py::test_cron_governance_disabled_is_noop`
+   proves disabled enterprise mode preserves legacy cron behavior and does not
+   audit.
+4. Enterprise-on gates:
+   `tests/enterprise/test_cron_governance.py::test_cron_governance_valid_envelope_allows_and_audits_without_raw_intent`,
+   `tests/enterprise/test_cron_governance.py::test_cron_governance_missing_owner_fails_closed`,
+   `tests/enterprise/test_cron_governance.py::test_cron_governance_expired_or_invalid_expiry_fails_closed`,
+   and
+   `tests/enterprise/test_cron_governance.py::test_cron_governance_binds_owner_to_agent_subject`
+   prove valid jobs are allowed, malformed jobs fail closed, raw intent is not
+   logged, and approved owner context reaches the agent.
+5. Doctor evidence:
+   `tests/enterprise/test_enterprise_doctor.py` includes the
+   `cron_governance` diagnostic check.
+6. Explicit limitation: this is a wrapper and subject-binding control, not an
+   admin-managed scheduler UI, recurrence-risk engine, or SIEM event pipeline.
+
+MVP-1 Access Broker v0 evidence:
+
+1. Enforcement points: `enterprise.access.AccessGrantStore` approves and
+   revokes staged grants, and `enterprise.firewall.action.evaluate_tool_call(...)`
+   checks grants before allowing high-risk staged actions through.
+2. Enterprise module: `enterprise/access.py` stores grants in local SQLite,
+   binds them to subject, tool, action hash, approver, policy version, expiry,
+   and revocation state, and emits `action_approved` and
+   `access_grant_revoked` audit events.
+3. Enterprise-on gates:
+   `tests/enterprise/test_access_broker.py::test_access_broker_approves_stage_with_scoped_grant_and_audit`,
+   `tests/enterprise/test_access_broker.py::test_access_grant_allows_exact_action_and_changed_args_stage_again`,
+   and
+   `tests/enterprise/test_access_broker.py::test_revoked_access_grant_fails_closed_for_same_action`
+   prove approval creates a scoped grant, exact repeat execution is allowed,
+   changed arguments stage again, and revoked grants deny the same action.
+4. Explicit limitation: this is the grant lifecycle behind staged approvals,
+   not a complete approval queue UI/API or approved side-effect execution
+   workflow.
+
+MVP-1 Secret Broker v0 evidence:
+
+1. Enforcement point: `enterprise.secrets.FakeSecretBroker.issue_credential(...)`
+   requires a valid secret-issue access grant before issuing a credential
+   reference.
+2. Enterprise module: `enterprise/secrets.py` validates subject, resource,
+   scope action, expiry, and revocation; it returns
+   `broker://credential/...` references and stores only credential metadata and
+   secret hashes.
+3. Denial gate:
+   `tests/enterprise/test_secret_broker.py::test_fake_secret_broker_denies_without_policy_grant`
+   proves broker access fails closed and audits request plus denial when no
+   grant exists.
+4. Issuance gates:
+   `tests/enterprise/test_secret_broker.py::test_fake_secret_broker_issues_opaque_credential_after_valid_grant`
+   and
+   `tests/enterprise/test_secret_broker.py::test_secret_broker_rejects_unscoped_or_stale_grants`
+   prove valid grants issue opaque credentials and mismatched, unscoped,
+   expired, or revoked grants fail closed.
+5. Non-leakage gate:
+   `tests/enterprise/test_secret_broker.py::test_secret_broker_reference_does_not_leak_raw_secret_to_governed_boundaries`
+   proves raw fake secrets are absent from credential references, model-visible
+   tool messages, provider payloads, and audit event JSON on covered paths.
+6. Doctor evidence:
+   `tests/enterprise/test_enterprise_doctor.py` includes the `secret_broker`
+   diagnostic check.
+7. Explicit limitation: this is a fake in-memory broker for lifecycle proof. It
+   does not claim real vault/KMS integration, provider runtime injection,
+   cloud-secret rotation, or emergency revocation across live provider clients.
+
+MVP-1 Closure evidence:
+
+1. Closure note: `ENTERPRISE_MVP1_READINESS.md` records claim boundaries,
+   completed issue/PR mapping, evidence matrix, and next milestone direction.
+2. GitHub state at closure: all `enterprise-mvp1` issues are closed and no PRs
+   are open against `enterprise/main`.
+3. Release gate: `python scripts\enterprise_mvp0_gate.py` remains the required
+   local and CI gate before merging runtime, policy, or claim-boundary changes.
+4. Verification:
+   `python scripts\enterprise_mvp0_gate.py` passed locally with 113 enterprise
+   tests and 15 targeted Hermes authority-seam tests for this closure slice.
