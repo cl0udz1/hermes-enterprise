@@ -104,3 +104,24 @@ The third implementation slice is Plugin and MCP admission:
 6. This is an admission boundary, not full plugin sandboxing, code-signature
    verification, dynamic revocation of already-running MCP servers, or
    provider-specific memory/model plugin governance.
+
+## MVP-1 Closure Snapshot
+
+MVP-1 is now closed as a governance-foundation checkpoint. The detailed closure
+note is `ENTERPRISE_MVP1_READINESS.md`.
+
+| Issue | PR | Control |
+|---|---|---|
+| #14 | #22 | Initial provider egress guard |
+| #15 | #24 | Memory governance guard |
+| #16 | #25 | Plugin and MCP admission guard |
+| #17 | #26 | Gateway identity binding |
+| #18 | #27 | Cron governance wrapper |
+| #19 | #28 | Access Broker grant lifecycle |
+| #20 | #29 | Fake Secret Broker lifecycle |
+| #23 | #30 | Expanded provider egress coverage |
+
+MVP-1 does not claim production enterprise readiness. The next milestone should
+focus on the managed enterprise surface: approval queue, admin assignments,
+real vault/KMS integration, SIEM/tamper-evident audit, tenant/workspace
+isolation, runtime sandboxing, and policy-pack authoring.

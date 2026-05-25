@@ -9,7 +9,7 @@ cannot be controlled any other way.
 
 ## Current Status
 
-Nine enterprise runtime authority patch points exist:
+Eleven enterprise runtime authority patch points exist:
 
 1. MVP-0 Action Firewall v0 patches the Hermes tool execution preflight in
    `agent/tool_executor.py`.
@@ -28,7 +28,11 @@ Nine enterprise runtime authority patch points exist:
    `agent/auxiliary_client.py`.
 8. MVP-1 Provider Egress Guard patches sensitive streaming denial seams in
    `agent/chat_completion_helpers.py` and `agent/codex_runtime.py`.
-9. Enterprise Doctor patches `hermes_cli/doctor.py` for diagnostics only.
+9. MVP-1 Gateway Identity Guard patches gateway event dispatch in
+   `gateway/run.py`.
+10. MVP-1 Cron Governance Guard patches scheduled execution in
+    `cron/scheduler.py`.
+11. Enterprise Doctor patches `hermes_cli/doctor.py` for diagnostics only.
 
 The patches are disabled by default through `enterprise.enabled: false`. They do
 not yet patch a real external vault/KMS, embeddings, or every direct provider
@@ -58,6 +62,10 @@ It does not patch mature Hermes runtime files.
 
 MVP-0 Closure Gate adds a local gate runner, downstream GitHub Actions workflow,
 and readiness note only. It does not patch mature Hermes runtime files.
+
+Access Broker and Secret Broker v0 add enterprise modules and action-firewall
+integration only. They do not add new mature Hermes core runtime patch points
+outside the already-recorded Action Firewall seam.
 
 Upstream base:
 
@@ -395,6 +403,116 @@ Notes:
   code-signature verification, runtime syscall/network sandboxing, dynamic
   revocation of already-running MCP servers, or coverage of the separate memory
   and model-provider plugin discovery systems.
+
+### Patch: Gateway Identity Guard
+
+Status: MVP-1 slice
+Owner: downstream enterprise fork
+Date: 2026-05-24
+Upstream base: `710d48ad4`
+
+Invariant:
+- In enterprise mode, gateway events from messaging platforms must bind to an
+  approved enterprise subject before dispatch or fail closed.
+- Raw platform user, channel, and thread identifiers must not become the
+  primary authorization subject when an enterprise assignment exists.
+- When enterprise mode is disabled, existing gateway behavior must stay
+  unchanged.
+
+Why plugin/sidecar cannot enforce it:
+- Gateway dispatch owns the platform source object and is the last reliable
+  point before a message event becomes agent work.
+- A plugin cannot guarantee that every platform adapter, command path, and
+  future gateway route will bind the same enterprise subject before tool
+  authorization.
+
+Patch shape:
+- Add lazy enterprise gateway identity evaluation in `gateway/run.py`.
+- Bind the enterprise subject onto the gateway event and session source before
+  dispatch.
+- Preserve private raw platform IDs only as fallback behavior when enterprise
+  mode is disabled or no enterprise subject is available.
+
+Files touched:
+- `gateway/run.py`
+- `enterprise/gateway_identity.py`
+- `enterprise/contracts.py`
+- `enterprise/config.py`
+- `enterprise/doctor.py`
+- `tests/enterprise/test_gateway_identity.py`
+- `tests/enterprise/test_enterprise_doctor.py`
+
+Enterprise-off compatibility:
+- `tests/enterprise/test_gateway_identity.py::test_gateway_identity_disabled_is_noop`
+
+Enterprise-on security gate:
+- `tests/enterprise/test_gateway_identity.py::test_gateway_identity_binds_assignment_and_audits_without_raw_ids`
+- `tests/enterprise/test_gateway_identity.py::test_gateway_identity_denies_unmapped_subject`
+- `tests/enterprise/test_gateway_identity.py::test_action_firewall_prefers_enterprise_gateway_subject`
+- `tests/enterprise/test_gateway_identity.py::test_action_firewall_falls_back_to_private_gateway_user_id`
+
+Rollback plan:
+- Set `enterprise.enabled: false` to preserve normal Hermes gateway behavior.
+- If the patch itself must be removed, delete the gateway identity evaluation
+  and binding helpers in `gateway/run.py`; the enterprise module becomes inert.
+
+Notes:
+- This is identity assignment binding, not full SSO, SCIM, RBAC, org lifecycle,
+  or an admin assignment UI.
+
+### Patch: Cron Governance Guard
+
+Status: MVP-1 slice
+Owner: downstream enterprise fork
+Date: 2026-05-24
+Upstream base: `2224c5ed5`
+
+Invariant:
+- In enterprise mode, scheduled jobs must carry owner, intent, expiry, and
+  policy-context metadata before agent execution.
+- Approved cron owner context must be bound to the spawned agent subject.
+- When enterprise mode is disabled, existing cron behavior must stay unchanged.
+
+Why plugin/sidecar cannot enforce it:
+- The scheduler owns job loading, recurrence, and agent construction; a plugin
+  outside that path cannot reliably stop a malformed job before an agent starts.
+- A sidecar can observe schedule metadata, but it cannot consistently bind the
+  approved owner onto the in-process Hermes agent subject before tool policy is
+  evaluated.
+
+Patch shape:
+- Add lazy enterprise cron governance evaluation in `cron/scheduler.py`.
+- Deny jobs whose owner, intent, expiry, or policy context is missing or
+  invalid.
+- Bind approved owner and job context onto the agent before execution.
+
+Files touched:
+- `cron/scheduler.py`
+- `enterprise/cron_governance.py`
+- `enterprise/contracts.py`
+- `enterprise/config.py`
+- `enterprise/doctor.py`
+- `tests/enterprise/test_cron_governance.py`
+- `tests/enterprise/test_enterprise_doctor.py`
+
+Enterprise-off compatibility:
+- `tests/enterprise/test_cron_governance.py::test_cron_governance_disabled_is_noop`
+
+Enterprise-on security gate:
+- `tests/enterprise/test_cron_governance.py::test_cron_governance_valid_envelope_allows_and_audits_without_raw_intent`
+- `tests/enterprise/test_cron_governance.py::test_cron_governance_missing_owner_fails_closed`
+- `tests/enterprise/test_cron_governance.py::test_cron_governance_expired_or_invalid_expiry_fails_closed`
+- `tests/enterprise/test_cron_governance.py::test_cron_governance_binds_owner_to_agent_subject`
+
+Rollback plan:
+- Set `enterprise.enabled: false` to preserve normal Hermes cron behavior.
+- If the patch itself must be removed, delete the cron governance evaluation
+  and binding helpers in `cron/scheduler.py`; the enterprise module becomes
+  inert.
+
+Notes:
+- This is a governance wrapper, not an admin scheduler UI, recurrence-risk
+  engine, SIEM export, or human approval workflow.
 
 ## Entry Template
 
